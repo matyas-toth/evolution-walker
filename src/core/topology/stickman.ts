@@ -10,8 +10,8 @@ import { Topology } from '@/core/types';
  * 
  * Structure:
  * - 9 particles: head, torso, 2 arms (shoulder + hand each), 2 legs (hip + foot each)
- * - 9 constraints: bones connecting the structure
- * - 8 muscles: active oscillatory constraints for movement
+ * - 12 constraints: bones connecting the structure (includes shoulder width and head-to-shoulder support)
+ * - 10 muscles: active oscillatory constraints for movement (legs, core, and arms)
  * 
  * Initial positions are relative to origin (0, 0), where:
  * - Positive Y is downward
@@ -158,7 +158,7 @@ export const STICKMAN_TOPOLOGY: Topology = {
       id: 'torso-l-shoulder',
       p1Id: 'torso',
       p2Id: 'l-shoulder',
-      restLength: 12,
+      restLength: 16,
       stiffness: 0.85,
       damping: 0.1,
     },
@@ -166,7 +166,35 @@ export const STICKMAN_TOPOLOGY: Topology = {
       id: 'torso-r-shoulder',
       p1Id: 'torso',
       p2Id: 'r-shoulder',
-      restLength: 12,
+      restLength: 16,
+      stiffness: 0.85,
+      damping: 0.1,
+    },
+    
+    // Shoulder width constraint (prevents shoulders from collapsing inward)
+    {
+      id: 'l-shoulder-r-shoulder',
+      p1Id: 'l-shoulder',
+      p2Id: 'r-shoulder',
+      restLength: 30,
+      stiffness: 0.9,
+      damping: 0.1,
+    },
+    
+    // Head to shoulders (trapezius-like support, prevents shoulders from drooping)
+    {
+      id: 'head-l-shoulder',
+      p1Id: 'head',
+      p2Id: 'l-shoulder',
+      restLength: 21,
+      stiffness: 0.85,
+      damping: 0.1,
+    },
+    {
+      id: 'head-r-shoulder',
+      p1Id: 'head',
+      p2Id: 'r-shoulder',
+      restLength: 21,
       stiffness: 0.85,
       damping: 0.1,
     },
@@ -215,7 +243,7 @@ export const STICKMAN_TOPOLOGY: Topology = {
       id: 'l-leg-muscle-2',
       p1Id: 'torso',
       p2Id: 'l-foot',
-      baseLength: 25,
+      baseLength: 36,
       stiffness: 0.6,
       damping: 0.15,
     },
@@ -223,7 +251,7 @@ export const STICKMAN_TOPOLOGY: Topology = {
       id: 'r-leg-muscle-2',
       p1Id: 'torso',
       p2Id: 'r-foot',
-      baseLength: 25,
+      baseLength: 36,
       stiffness: 0.6,
       damping: 0.15,
     },
@@ -246,20 +274,43 @@ export const STICKMAN_TOPOLOGY: Topology = {
       damping: 0.15,
     },
     
-    // Arm muscles, for balance during movement
+    // Arm muscles (hip to hand for balance and coordination)
+    // When contracted, pulls hand toward hip (like putting hand in pocket)
+    // When relaxed, allows arm to swing forward/backward
     {
-      id: 'l-arm-muscle',
-      p1Id: 'l-shoulder',
+      id: 'l-arm-muscle-hip',
+      p1Id: 'l-hip',
       p2Id: 'l-hand',
-      baseLength: 15,
+      baseLength: 20,
       stiffness: 0.6,
       damping: 0.15,
     },
     {
-      id: 'r-arm-muscle',
+      id: 'r-arm-muscle-hip',
+      p1Id: 'r-hip',
+      p2Id: 'r-hand',
+      baseLength: 20,
+      stiffness: 0.6,
+      damping: 0.15,
+    },
+    
+    // Arm muscles (shoulder to hand for direct arm control)
+    // Provides direct control over arm extension/flexion
+    // When contracted, bends arm (hand toward shoulder)
+    // When relaxed, extends arm
+    {
+      id: 'l-arm-muscle-shoulder',
+      p1Id: 'l-shoulder',
+      p2Id: 'l-hand',
+      baseLength: 14, 
+      stiffness: 0.6,
+      damping: 0.15,
+    },
+    {
+      id: 'r-arm-muscle-shoulder',
       p1Id: 'r-shoulder',
       p2Id: 'r-hand',
-      baseLength: 15,
+      baseLength: 14, 
       stiffness: 0.6,
       damping: 0.15,
     },
