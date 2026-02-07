@@ -224,8 +224,8 @@ export default function GeneticAlgorithmShowcase() {
         const distance = currentCreature.currentPos.x - currentCreature.startPos.x;
         ctx.fillStyle = '#ffffff';
         ctx.font = '16px sans-serif';
-        ctx.fillText(`Distance: ${distance.toFixed(1)}px`, 20, 30);
-        ctx.fillText(`Time: ${totalSimTimeRef.current.toFixed(1)}s`, 20, 50);
+        ctx.fillText(`Distance: ${distance.toFixed(1)}px`, 600, 30);
+        ctx.fillText(`Time: ${totalSimTimeRef.current.toFixed(1)}s`, 600, 50);
       }
       
       // Render success message
@@ -332,7 +332,7 @@ export default function GeneticAlgorithmShowcase() {
               <div>Gravity: {GRAVITY}px/s²</div>
               <div>Muscle Stiffness: {(MUSCLE_STIFFNESS * 100).toFixed(0)}%</div>
               <div>Ground Friction: {(GROUND_FRICTION * 100).toFixed(0)}%</div>
-              <div>Time: {simulationTime.toFixed(1)}s</div>
+              <div>Time: {totalSimTimeRef.current.toFixed(1)}s</div>
             </div>
           </div>
         </Panel>
