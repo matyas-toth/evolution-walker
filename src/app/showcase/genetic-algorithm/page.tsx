@@ -29,7 +29,7 @@ import { Creature, Genome } from '@/core/types';
 const FIXED_TIMESTEP = 1 / 60; // 60 Hz
 const GRAVITY = 200; // 200px/s²
 const MUSCLE_STIFFNESS = 0.7; // 70%
-const GROUND_FRICTION = 0.7; // 70%
+const GROUND_FRICTION = 0.4; // 70%
 
 export default function GeneticAlgorithmShowcase() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
