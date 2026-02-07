@@ -36,6 +36,7 @@ export default function GeneticAlgorithmShowcase() {
   const animationFrameRef = useRef<number | undefined>(undefined);
   const lastTimeRef = useRef<number>(0);
   const timeAccumulatorRef = useRef<number>(0);
+  const totalSimTimeRef = useRef<number>(0);
   const lastStateUpdateRef = useRef<number>(0);
   
   // Refs to hold latest values (don't trigger re-renders)
@@ -75,6 +76,7 @@ export default function GeneticAlgorithmShowcase() {
     creatureRef.current = newCreature;
     reachedTargetRef.current = false;
     timeAccumulatorRef.current = 0;
+    totalSimTimeRef.current = 0;
     lastStateUpdateRef.current = 0;
     
     setGenome(randomGenome);
@@ -121,9 +123,9 @@ export default function GeneticAlgorithmShowcase() {
       timeAccumulatorRef.current += deltaTime / 1000; // Convert to seconds
       
       // Throttle state updates (every 0.1 seconds) to avoid constant re-renders
-      if (timeAccumulatorRef.current - lastStateUpdateRef.current >= 0.1) {
-        setSimulationTime(timeAccumulatorRef.current);
-        lastStateUpdateRef.current = timeAccumulatorRef.current;
+      if (totalSimTimeRef.current - lastStateUpdateRef.current >= 0.1) {
+        setSimulationTime(totalSimTimeRef.current);
+        lastStateUpdateRef.current = totalSimTimeRef.current;
       }
       
       while (timeAccumulatorRef.current >= FIXED_TIMESTEP) {
@@ -134,7 +136,7 @@ export default function GeneticAlgorithmShowcase() {
         const workingCreature: Creature = { ...currentCreature };
         
         // Update muscles (genome-driven oscillation)
-        updateMuscles(workingCreature.muscles, timeAccumulatorRef.current);
+        updateMuscles(workingCreature.muscles, totalSimTimeRef.current);
         
         // Update muscle stiffness
         workingCreature.muscles.forEach((muscle) => {
@@ -190,9 +192,12 @@ export default function GeneticAlgorithmShowcase() {
         // Update ref with latest creature
         creatureRef.current = workingCreature;
         
+        totalSimTimeRef.current += FIXED_TIMESTEP;
+        
         // Throttled state update for display (every 0.1s)
-        if (timeAccumulatorRef.current - lastStateUpdateRef.current >= 0.1) {
+        if (totalSimTimeRef.current - lastStateUpdateRef.current >= 0.1) {
           setCreature(workingCreature);
+          lastStateUpdateRef.current = totalSimTimeRef.current;
         }
         
         timeAccumulatorRef.current -= FIXED_TIMESTEP;
@@ -220,7 +225,7 @@ export default function GeneticAlgorithmShowcase() {
         ctx.fillStyle = '#ffffff';
         ctx.font = '16px sans-serif';
         ctx.fillText(`Distance: ${distance.toFixed(1)}px`, 20, 30);
-        ctx.fillText(`Time: ${timeAccumulatorRef.current.toFixed(1)}s`, 20, 50);
+        ctx.fillText(`Time: ${totalSimTimeRef.current.toFixed(1)}s`, 20, 50);
       }
       
       // Render success message

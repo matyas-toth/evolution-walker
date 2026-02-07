@@ -20,7 +20,7 @@ export function createRandomGenome(
   const genes: MuscleGene[] = topology.muscles.map((muscle) => ({
     muscleId: muscle.id,
     amplitude: Math.random() * 0.5 + 0.1, // 0.1..0.6
-    frequency: Math.random() * 1 + 0.3, // 0.5..2.5 Hz
+    frequency: Math.random() * 2 + 0.1, // 0.5..2.5 Hz
     phase: Math.random() * Math.PI * 2, // 0..2π
   }));
 
