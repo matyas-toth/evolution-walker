@@ -64,7 +64,7 @@ export default function GeneticAlgorithmShowcase() {
   // Initialize creature with random genome
   const initializeCreature = () => {
     const randomGenome = createRandomGenome(STICKMAN_TOPOLOGY, 0);
-    const spawnPos = { x: 100, y: groundY - 50 };
+    const spawnPos = { x: 100, y: groundY - 30 };
     const newCreature = createCreatureFromTopology(
       STICKMAN_TOPOLOGY,
       randomGenome,

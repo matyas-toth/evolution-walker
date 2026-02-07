@@ -39,10 +39,10 @@ export function handleGroundCollision(
       // Apply friction to horizontal velocity
       const frictionForce = velocity.x * ground.friction;
       
-      // Apply restitution (bounciness) to vertical velocity
+      // Apply restitution (bounciness): reflect vertical velocity and scale by restitution
       const newOldPos = {
         x: newPos.x - velocity.x + frictionForce,
-        y: newPos.y - velocity.y * (1 - ground.restitution),
+        y: newPos.y + velocity.y * ground.restitution,
       };
       
       return {
