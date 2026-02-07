@@ -39,10 +39,15 @@ export function handleGroundCollision(
       // Apply friction to horizontal velocity
       const frictionForce = velocity.x * ground.friction;
       
-      // Apply restitution (bounciness): reflect vertical velocity and scale by restitution
+      // Vertical: preserve upward (constraint push-off) or apply restitution (impact)
+      const PRESERVE_UPWARD_DAMP = 0.95; // slight decay to avoid runaway bounces
+      const newOldPosY =
+        velocity.y < 0
+          ? newPos.y - velocity.y * PRESERVE_UPWARD_DAMP // preserve upward so legs can push
+          : newPos.y + velocity.y * ground.restitution; // bounce on impact
       const newOldPos = {
         x: newPos.x - velocity.x + frictionForce,
-        y: newPos.y + velocity.y * ground.restitution,
+        y: newOldPosY,
       };
       
       return {
