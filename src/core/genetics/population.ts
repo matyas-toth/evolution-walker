@@ -15,7 +15,7 @@ import { Genome, MuscleGene, Topology } from '@/core/types';
  */
 export function createRandomGenome(
   topology: Topology,
-  generation: number = 0
+  generation: number = 0 
 ): Genome {
   const genes: MuscleGene[] = topology.muscles.map((muscle) => ({
     muscleId: muscle.id,
