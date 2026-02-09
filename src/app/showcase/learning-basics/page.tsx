@@ -35,15 +35,15 @@ import { Creature } from '@/core/types';
 
 const FIXED_TIMESTEP = 1 / 60;
 const GRAVITY = 200;
-const MUSCLE_STIFFNESS = 0.7;
-const GROUND_FRICTION = 0.4;
-const POPULATION_SIZE = 50;
+const MUSCLE_STIFFNESS = 0.8;
+const GROUND_FRICTION = 0.7;
+const POPULATION_SIZE = 1000;
 const GENERATION_DURATION = 15;
 const ELITISM_COUNT = 2;
 const PARENTS_TOP_PERCENT = 0.2;
-const MUTATION_RATE = 0.04;
-const MUTATION_STRENGTH = 0.15;
-const TOP_DISPLAY_COUNT = 10;
+const MUTATION_RATE = 0.05;
+const MUTATION_STRENGTH = 0.25;
+const TOP_DISPLAY_COUNT = 5;
 
 type Phase = 'running' | 'evaluating' | 'evolving' | 'replay' | 'winner';
 
