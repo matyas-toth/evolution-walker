@@ -76,3 +76,36 @@ export function selectParents(
   const topCount = Math.max(1, Math.floor(sorted.length * topPercent));
   return sorted.slice(0, topCount);
 }
+
+/**
+ * Selects both elites and parents in a single sort operation
+ * Optimized version that sorts the population once and extracts both groups
+ * 
+ * @param creatures Array of creatures to select from
+ * @param elitismCount Number of elites to select
+ * @param topPercent Top percentage to select as parents (default: 0.5 = top 50%)
+ * @returns Object containing elites, parents, and sorted array
+ */
+export function selectElitesAndParents(
+  creatures: Creature[],
+  elitismCount: number,
+  topPercent: number = 0.5
+): { elites: Creature[]; parents: Creature[]; sorted: Creature[] } {
+  if (creatures.length === 0) {
+    return { elites: [], parents: [], sorted: [] };
+  }
+
+  // Sort once by fitness descending
+  const sorted = [...creatures].sort(
+    (a, b) => b.fitness.total - a.fitness.total
+  );
+
+  // Extract elites (top N)
+  const elites = sorted.slice(0, Math.min(elitismCount, sorted.length));
+
+  // Extract parents (top percentage)
+  const topCount = Math.max(1, Math.floor(sorted.length * topPercent));
+  const parents = sorted.slice(0, topCount);
+
+  return { elites, parents, sorted };
+}

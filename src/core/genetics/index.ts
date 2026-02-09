@@ -19,6 +19,7 @@ export {
   tournamentSelection,
   selectElites,
   selectParents,
+  selectElitesAndParents,
 } from './selection';
 
 // Crossover operations
@@ -31,3 +32,12 @@ export {
 export {
   mutateGenome,
 } from './mutation';
+
+// Evolution Worker
+export {
+  EvolutionWorker,
+  type EvolutionConfig,
+  type EvolutionInput,
+  type EvolutionOutput,
+  type CreatureData,
+} from './evolutionWorker';

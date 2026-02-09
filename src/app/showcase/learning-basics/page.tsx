@@ -12,11 +12,9 @@ import { createCreatureFromTopology, calculateCenterOfMass } from '@/core/simula
 import {
   createInitialPopulation,
   calculateFitness,
-  selectElites,
-  selectParents,
-  tournamentSelection,
-  arithmeticCrossover,
-  mutateGenome,
+  EvolutionWorker,
+  type EvolutionConfig,
+  type CreatureData,
 } from '@/core/genetics';
 import {
   integrateVerlet,
@@ -67,6 +65,7 @@ export default function LearningBasicsShowcase() {
   const generationRef = useRef<number>(0);
   const speedMultiplierRef = useRef<number>(1);
   const replayCreatureRef = useRef<Creature | null>(null);
+  const evolutionWorkerRef = useRef<EvolutionWorker | null>(null);
 
   const [creatures, setCreatures] = useState<Creature[]>([]);
   const [phase, setPhase] = useState<Phase>('running');
@@ -114,6 +113,19 @@ export default function LearningBasicsShowcase() {
     setSimulationTime(0);
     setIsReady(true);
   }
+
+  // Initialize evolution worker
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      evolutionWorkerRef.current = new EvolutionWorker();
+      return () => {
+        if (evolutionWorkerRef.current) {
+          evolutionWorkerRef.current.terminate();
+          evolutionWorkerRef.current = null;
+        }
+      };
+    }
+  }, []);
 
   useEffect(() => {
     initializePopulation();
@@ -170,34 +182,119 @@ export default function LearningBasicsShowcase() {
 
       if (currentPhase === 'evolving') {
         const creatures = creaturesRef.current;
-        const elites = selectElites(creatures, ELITISM_COUNT);
-        const parents = selectParents(creatures, PARENTS_TOP_PERCENT);
-        const nextGenomes = elites.map((c) => c.genome);
-        const currentGen = generationRef.current;
-        while (nextGenomes.length < POPULATION_SIZE) {
-          const p1 = tournamentSelection(parents, 3);
-          const p2 = tournamentSelection(parents, 3);
-          let offspring = arithmeticCrossover(p1.genome, p2.genome);
-          offspring = mutateGenome(offspring, MUTATION_RATE, MUTATION_STRENGTH);
-          offspring = { ...offspring, generation: currentGen + 1 };
-          nextGenomes.push(offspring);
+        const evolutionWorker = evolutionWorkerRef.current;
+
+        // Fallback to synchronous evolution if worker not available
+        if (!evolutionWorker || !evolutionWorker.isAvailable()) {
+          // Synchronous fallback (original code)
+          const elites = creatures
+            .sort((a, b) => b.fitness.total - a.fitness.total)
+            .slice(0, ELITISM_COUNT);
+          const parents = creatures
+            .sort((a, b) => b.fitness.total - a.fitness.total)
+            .slice(0, Math.floor(creatures.length * PARENTS_TOP_PERCENT));
+          const nextGenomes = elites.map((c) => c.genome);
+          const currentGen = generationRef.current;
+          while (nextGenomes.length < POPULATION_SIZE) {
+            const p1 = parents[Math.floor(Math.random() * parents.length)];
+            const p2 = parents[Math.floor(Math.random() * parents.length)];
+            let offspring = {
+              id: `genome-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              genes: p1.genome.genes.map((gene1, i) => {
+                const gene2 = p2.genome.genes[i];
+                const alpha = 0.5;
+                return {
+                  muscleId: gene1.muscleId,
+                  amplitude: gene1.amplitude * alpha + gene2.amplitude * (1 - alpha),
+                  frequency: gene1.frequency * alpha + gene2.frequency * (1 - alpha),
+                  phase: gene1.phase * alpha + gene2.phase * (1 - alpha),
+                };
+              }),
+              generation: currentGen + 1,
+              parentIds: [p1.genome.id, p2.genome.id],
+              createdAt: Date.now(),
+            };
+            // Mutation
+            offspring.genes = offspring.genes.map((gene) => {
+              if (Math.random() > MUTATION_RATE) return gene;
+              const change = (Math.random() - 0.5) * 2 * MUTATION_STRENGTH;
+              return {
+                ...gene,
+                amplitude: Math.max(0.05, Math.min(0.8, gene.amplitude * (1 + change))),
+                frequency: Math.max(0.1, Math.min(5.0, gene.frequency * (1 + change))),
+                phase: Math.max(0, Math.min(Math.PI * 2, gene.phase * (1 + change))),
+              };
+            });
+            nextGenomes.push(offspring);
+          }
+          const spawnPos = { x: 100, y: groundY - 30 };
+          const newCreatures: Creature[] = nextGenomes.map((genome) =>
+            createCreatureFromTopology(STICKMAN_TOPOLOGY, genome, spawnPos)
+          );
+          creaturesRef.current = newCreatures;
+          generationRef.current = currentGen + 1;
+          setGeneration(currentGen + 1);
+          generationTimeRef.current = 0;
+          totalSimTimeRef.current = 0;
+          timeAccumulatorRef.current = 0;
+          lastStateUpdateRef.current = 0;
+          phaseRef.current = 'running';
+          setPhase('running');
+          setCreatures([...newCreatures]);
+          animationFrameRef.current = requestAnimationFrame(update);
+          return;
         }
-        const colors = creatureColorsRef.current;
-        const spawnPos = { x: 100, y: groundY - 30 };
-        const newCreatures: Creature[] = nextGenomes.map((genome) =>
-          createCreatureFromTopology(STICKMAN_TOPOLOGY, genome, spawnPos)
-        );
-        creaturesRef.current = newCreatures;
-        generationRef.current = currentGen + 1;
-        setGeneration(currentGen + 1);
-        generationTimeRef.current = 0;
-        totalSimTimeRef.current = 0;
-        timeAccumulatorRef.current = 0;
-        lastStateUpdateRef.current = 0;
-        phaseRef.current = 'running';
-        setPhase('running');
-        setCreatures([...newCreatures]);
-        animationFrameRef.current = requestAnimationFrame(update);
+
+        // Use worker for evolution
+        const creatureData: CreatureData[] = creatures.map((c) => ({
+          genome: c.genome,
+          fitness: c.fitness,
+        }));
+
+        const config: EvolutionConfig = {
+          elitismCount: ELITISM_COUNT,
+          parentsTopPercent: PARENTS_TOP_PERCENT,
+          mutationRate: MUTATION_RATE,
+          mutationStrength: MUTATION_STRENGTH,
+          populationSize: POPULATION_SIZE,
+          currentGeneration: generationRef.current,
+        };
+
+        evolutionWorker
+          .evolve({ creatures: creatureData, config })
+          .then((output) => {
+            if (output.error) {
+              console.error('Evolution error:', output.error);
+              // Fallback to synchronous evolution on error
+              phaseRef.current = 'evolving';
+              animationFrameRef.current = requestAnimationFrame(update);
+              return;
+            }
+
+            const spawnPos = { x: 100, y: groundY - 30 };
+            const newCreatures: Creature[] = output.genomes.map((genome) =>
+              createCreatureFromTopology(STICKMAN_TOPOLOGY, genome, spawnPos)
+            );
+            creaturesRef.current = newCreatures;
+            generationRef.current = config.currentGeneration + 1;
+            setGeneration(config.currentGeneration + 1);
+            generationTimeRef.current = 0;
+            totalSimTimeRef.current = 0;
+            timeAccumulatorRef.current = 0;
+            lastStateUpdateRef.current = 0;
+            phaseRef.current = 'running';
+            setPhase('running');
+            setCreatures([...newCreatures]);
+            animationFrameRef.current = requestAnimationFrame(update);
+          })
+          .catch((error) => {
+            console.error('Evolution worker failed:', error);
+            // Fallback to synchronous evolution on error
+            phaseRef.current = 'evolving';
+            animationFrameRef.current = requestAnimationFrame(update);
+          });
+
+        // Don't continue the animation loop here - worker will call update when done
         return;
       }
 
