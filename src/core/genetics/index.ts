@@ -12,6 +12,7 @@ export {
 // Fitness calculation
 export {
   calculateFitness,
+  calculateFitnessAdvanced,
 } from './fitness';
 
 // Selection algorithms

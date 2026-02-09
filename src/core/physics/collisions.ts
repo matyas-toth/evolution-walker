@@ -138,3 +138,22 @@ export function checkCreatureTargetZone(
     checkTargetZone(particle, targetZone)
   );
 }
+
+/**
+ * If the creature's head particle touches or goes below ground, marks the creature as dead.
+ * Call after handleGroundCollision. Uses particle id 'head' (e.g. stickman topology).
+ *
+ * @param creature Creature to check (mutated: isDead set to true if head touches ground)
+ * @param groundY Ground Y coordinate
+ */
+export function checkHeadGroundAndKill(
+  creature: Creature,
+  groundY: number
+): void {
+  if (creature.isDead) return;
+  const head = creature.particles.find((p) => p.id === 'head');
+  if (!head) return;
+  if (head.pos.y >= groundY - head.radius) {
+    creature.isDead = true;
+  }
+}

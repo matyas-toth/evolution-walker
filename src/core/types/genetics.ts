@@ -102,4 +102,7 @@ export interface Creature {
   
   /** Whether the creature reached the target zone */
   reachedTarget: boolean;
+  
+  /** Smallest Y of head during run (highest head position); used for upright bonus */
+  minHeadY?: number;
 }

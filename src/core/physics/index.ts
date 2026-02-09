@@ -22,4 +22,5 @@ export {
   handleWallCollision,
   checkTargetZone,
   checkCreatureTargetZone,
+  checkHeadGroundAndKill,
 } from './collisions';

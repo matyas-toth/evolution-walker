@@ -1,9 +1,10 @@
 'use client';
 
 /**
- * Learning Basics Showcase
- * Evolution loop: 50 creatures, 15s per generation, GA until one reaches target.
- * @module app/showcase/learning-basics/page
+ * Advanced Learning Showcase
+ * Evolution with fitness = distance (primary) + upright/head-height bonus (secondary).
+ * Head touching ground kills the creature and freezes its simulation.
+ * @module app/showcase/advanced-learning/page
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -11,7 +12,7 @@ import { STICKMAN_TOPOLOGY } from '@/core/topology';
 import { createCreatureFromTopology, calculateCenterOfMass } from '@/core/simulation/creature';
 import {
   createInitialPopulation,
-  calculateFitness,
+  calculateFitnessAdvanced,
   EvolutionWorker,
   type EvolutionConfig,
   type CreatureData,
@@ -24,6 +25,7 @@ import {
   handleGroundCollision,
   handleWallCollision,
   checkCreatureTargetZone,
+  checkHeadGroundAndKill,
 } from '@/core/physics';
 import { renderCreature, renderGround, renderTargetZone } from '@/components/creatures/CreatureRenderer';
 import { GenomeDisplay } from '@/components/genetics/GenomeDisplay';
@@ -50,7 +52,7 @@ function getCreatureColor(index: number): string {
   return `hsl(${(index * 360) / POPULATION_SIZE}, 78%, 58%)`;
 }
 
-export default function LearningBasicsShowcase() {
+export default function AdvancedLearningShowcase() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameRef = useRef<number | undefined>(undefined);
   const lastTimeRef = useRef<number>(0);
@@ -169,6 +171,10 @@ export default function LearningBasicsShowcase() {
           const list = creaturesRef.current;
           for (let i = 0; i < list.length; i++) {
             const workingCreature: Creature = { ...list[i] };
+            if (workingCreature.isDead) {
+              list[i] = workingCreature;
+              continue;
+            }
             updateMuscles(workingCreature.muscles, totalSimTimeRef.current);
             workingCreature.muscles.forEach((m) => {
               m.stiffness = MUSCLE_STIFFNESS;
@@ -193,6 +199,14 @@ export default function LearningBasicsShowcase() {
             workingCreature.particles = handleWallCollision(workingCreature.particles, [
               { x: 0, normal: { x: 1, y: 0 } },
             ]);
+            checkHeadGroundAndKill(workingCreature, groundY);
+            const head = workingCreature.particles.find((p) => p.id === 'head');
+            if (head) {
+              workingCreature.minHeadY = Math.min(
+                workingCreature.minHeadY ?? head.pos.y,
+                head.pos.y
+              );
+            }
             workingCreature.currentPos = calculateCenterOfMass(workingCreature.particles);
             workingCreature.maxDistance = Math.max(
               workingCreature.maxDistance,
@@ -217,7 +231,7 @@ export default function LearningBasicsShowcase() {
           const creatures = creaturesRef.current;
           for (let i = 0; i < creatures.length; i++) {
             const c = creatures[i];
-            c.fitness = calculateFitness(c, targetZone, c.startPos.x);
+            c.fitness = calculateFitnessAdvanced(c, targetZone, c.startPos.x, groundY);
           }
           setCreatures([...creaturesRef.current]);
           const bestFitness = Math.max(
@@ -257,7 +271,6 @@ export default function LearningBasicsShowcase() {
 
         // Fallback to synchronous evolution if worker not available
         if (!evolutionWorker || !evolutionWorker.isAvailable()) {
-          // Synchronous fallback (original code)
           const elites = creatures
             .sort((a, b) => b.fitness.total - a.fitness.total)
             .slice(0, ELITISM_COUNT);
@@ -285,7 +298,6 @@ export default function LearningBasicsShowcase() {
               parentIds: [p1.genome.id, p2.genome.id],
               createdAt: Date.now(),
             };
-            // Mutation
             offspring.genes = offspring.genes.map((gene) => {
               if (Math.random() > MUTATION_RATE) return gene;
               const change = (Math.random() - 0.5) * 2 * MUTATION_STRENGTH;
@@ -316,7 +328,6 @@ export default function LearningBasicsShowcase() {
           return;
         }
 
-        // Use worker for evolution
         const creatureData: CreatureData[] = creatures.map((c) => ({
           genome: c.genome,
           fitness: c.fitness,
@@ -336,7 +347,6 @@ export default function LearningBasicsShowcase() {
           .then((output) => {
             if (output.error) {
               console.error('Evolution error:', output.error);
-              // Fallback to synchronous evolution on error
               phaseRef.current = 'evolving';
               animationFrameRef.current = requestAnimationFrame(update);
               return;
@@ -360,12 +370,10 @@ export default function LearningBasicsShowcase() {
           })
           .catch((error) => {
             console.error('Evolution worker failed:', error);
-            // Fallback to synchronous evolution on error
             phaseRef.current = 'evolving';
             animationFrameRef.current = requestAnimationFrame(update);
           });
 
-        // Don't continue the animation loop here - worker will call update when done
         return;
       }
 
@@ -403,6 +411,14 @@ export default function LearningBasicsShowcase() {
           workingCreature.particles = handleWallCollision(workingCreature.particles, [
             { x: 0, normal: { x: 1, y: 0 } },
           ]);
+          checkHeadGroundAndKill(workingCreature, groundY);
+          const head = workingCreature.particles.find((p) => p.id === 'head');
+          if (head) {
+            workingCreature.minHeadY = Math.min(
+              workingCreature.minHeadY ?? head.pos.y,
+              head.pos.y
+            );
+          }
           workingCreature.currentPos = calculateCenterOfMass(workingCreature.particles);
           workingCreature.maxDistance = Math.max(
             workingCreature.maxDistance,
@@ -481,7 +497,12 @@ export default function LearningBasicsShowcase() {
         if (totalSimTimeRef.current - lastStateUpdateRef.current >= 0.1) {
           const list = creaturesRef.current;
           for (let i = 0; i < list.length; i++) {
-            list[i].fitness = calculateFitness(list[i], targetZone, list[i].startPos.x);
+            list[i].fitness = calculateFitnessAdvanced(
+              list[i],
+              targetZone,
+              list[i].startPos.x,
+              groundY
+            );
           }
           setSimulationTime(totalSimTimeRef.current);
           setGenerationTime(generationTimeRef.current);
@@ -498,6 +519,10 @@ export default function LearningBasicsShowcase() {
           const list = creaturesRef.current;
           for (let i = 0; i < list.length; i++) {
             const workingCreature: Creature = { ...list[i] };
+            if (workingCreature.isDead) {
+              list[i] = workingCreature;
+              continue;
+            }
             updateMuscles(workingCreature.muscles, totalSimTimeRef.current);
             workingCreature.muscles.forEach((m) => {
               m.stiffness = MUSCLE_STIFFNESS;
@@ -522,6 +547,14 @@ export default function LearningBasicsShowcase() {
             workingCreature.particles = handleWallCollision(workingCreature.particles, [
               { x: 0, normal: { x: 1, y: 0 } },
             ]);
+            checkHeadGroundAndKill(workingCreature, groundY);
+            const head = workingCreature.particles.find((p) => p.id === 'head');
+            if (head) {
+              workingCreature.minHeadY = Math.min(
+                workingCreature.minHeadY ?? head.pos.y,
+                head.pos.y
+              );
+            }
             workingCreature.currentPos = calculateCenterOfMass(workingCreature.particles);
             workingCreature.maxDistance = Math.max(
               workingCreature.maxDistance,
@@ -561,16 +594,16 @@ export default function LearningBasicsShowcase() {
         renderTargetZone(ctx, targetZone);
 
         if (currentPhase === 'running' || phaseRef.current === 'running') {
-        const list = creaturesRef.current;
-        const colors = creatureColorsRef.current;
-        const withIndex = list.map((creature, index) => ({ creature, index }));
-        const top = withIndex
-          .sort(
-            (a, b) =>
-              (b.creature.fitness?.total ?? -Infinity) -
-              (a.creature.fitness?.total ?? -Infinity)
-          )
-          .slice(0, Math.min(TOP_DISPLAY_COUNT, list.length));
+          const list = creaturesRef.current;
+          const colors = creatureColorsRef.current;
+          const withIndex = list.map((creature, index) => ({ creature, index }));
+          const top = withIndex
+            .sort(
+              (a, b) =>
+                (b.creature.fitness?.total ?? -Infinity) -
+                (a.creature.fitness?.total ?? -Infinity)
+            )
+            .slice(0, Math.min(TOP_DISPLAY_COUNT, list.length));
           for (const { creature, index } of top) {
             renderCreature(ctx, creature, 1, colors[index]);
           }
@@ -606,7 +639,7 @@ export default function LearningBasicsShowcase() {
     <div className="relative w-full h-screen bg-gray-900 overflow-hidden">
       <FitnessChart
         data={fitnessHistory}
-        className="absolute top-0 left-0 w-full z-20"
+        className="absolute top-0 left-0 w-[60%] translate-x-[30%] z-20"
       />
       <canvas
         ref={canvasRef}
@@ -614,7 +647,7 @@ export default function LearningBasicsShowcase() {
         style={{ background: '#1a1a1a' }}
       />
       <div className="absolute top-4 left-4 z-10 space-y-4">
-        <Panel title="Learning Basics">
+        <Panel title="Advanced Learning">
           <div className="space-y-3">
             <Button onClick={initializePopulation} variant="primary">
               Run again
@@ -680,6 +713,8 @@ export default function LearningBasicsShowcase() {
               <div>Generation duration: {GENERATION_DURATION}s</div>
               <div>Elitism: {ELITISM_COUNT}</div>
               <div>Mutation: {(MUTATION_RATE * 100).toFixed(0)}%</div>
+              <div>Fitness: distance + upright (head height)</div>
+              <div>Head touch ground = dead</div>
             </div>
           </div>
         </Panel>
