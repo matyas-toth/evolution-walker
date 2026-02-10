@@ -26,7 +26,9 @@ export {
 // Crossover operations
 export {
   uniformCrossover,
+  uniformCrossoverWithBias,
   arithmeticCrossover,
+  sbxCrossover,
 } from './crossover';
 
 // Mutation

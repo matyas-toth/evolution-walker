@@ -90,6 +90,9 @@ export function createCreatureFromTopology(
       velocity: { x: 0, y: 0 },
     };
   });
+
+  const particleMap = new Map<string, Particle>();
+  particles.forEach((p) => particleMap.set(p.id, p));
   
   // Create constraints from topology
   const constraints: Constraint[] = topology.constraints.map((topoConstraint) => ({
@@ -146,6 +149,7 @@ export function createCreatureFromTopology(
     id: `creature-${Date.now()}-${Math.random()}`,
     genome: defaultGenome,
     particles,
+    particleMap,
     constraints,
     muscles,
     fitness,

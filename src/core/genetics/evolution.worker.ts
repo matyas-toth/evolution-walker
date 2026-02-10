@@ -5,7 +5,7 @@
  */
 
 import { Genome, FitnessScore } from '@/core/types';
-import { tournamentSelection, arithmeticCrossover, mutateGenome } from './index';
+import { tournamentSelection, uniformCrossoverWithBias, mutateGenome } from './index';
 
 // Worker-compatible creature type (minimal, just genome + fitness)
 interface CreatureData {
@@ -126,8 +126,9 @@ function evolveGeneration(input: EvolutionInput): EvolutionOutput {
     const p1 = workerTournamentSelection(parents, 3);
     const p2 = workerTournamentSelection(parents, 3);
 
-    // Crossover
-    let offspring = arithmeticCrossover(p1.genome, p2.genome);
+    // Uniform crossover with 60/40 bias toward fitter parent (preserves building blocks)
+    const probFromP1 = p1.fitness.total >= p2.fitness.total ? 0.6 : 0.4;
+    let offspring = uniformCrossoverWithBias(p1.genome, p2.genome, probFromP1);
 
     // Mutation
     offspring = mutateGenome(offspring, mutationRate, mutationStrength);

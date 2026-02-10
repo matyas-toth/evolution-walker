@@ -86,17 +86,12 @@ export function satisfyConstraints(
       const p2Ratio = p1.mass / totalMass;
       
       if (!p1.isLocked) {
-        p1.pos = {
-          x: p1.pos.x + correction.x * p1Ratio,
-          y: p1.pos.y + correction.y * p1Ratio,
-        };
+        p1.pos.x += correction.x * p1Ratio;
+        p1.pos.y += correction.y * p1Ratio;
       }
-      
       if (!p2.isLocked) {
-        p2.pos = {
-          x: p2.pos.x - correction.x * p2Ratio,
-          y: p2.pos.y - correction.y * p2Ratio,
-        };
+        p2.pos.x -= correction.x * p2Ratio;
+        p2.pos.y -= correction.y * p2Ratio;
       }
     });
   }

@@ -15,7 +15,6 @@ import {
   integrateVerlet,
   updateMuscles,
   satisfyConstraints,
-  createParticleMap,
   handleGroundCollision,
   handleWallCollision,
   checkCreatureTargetZone,
@@ -144,7 +143,7 @@ export default function GeneticAlgorithmShowcase() {
         });
         
         // Verlet integration
-        workingCreature.particles = integrateVerlet(
+        integrateVerlet(
           workingCreature.particles,
           { x: 0, y: GRAVITY },
           FIXED_TIMESTEP,
@@ -152,7 +151,7 @@ export default function GeneticAlgorithmShowcase() {
         );
         
         // Satisfy constraints
-        const particleMap = createParticleMap(workingCreature.particles);
+        const particleMap = workingCreature.particleMap;
         const allConstraints = [
           ...workingCreature.constraints,
           ...workingCreature.muscles,
@@ -160,17 +159,14 @@ export default function GeneticAlgorithmShowcase() {
         satisfyConstraints(allConstraints, particleMap, 3);
         
         // Handle collisions
-        workingCreature.particles = handleGroundCollision(
-          workingCreature.particles,
-          {
-            y: groundY,
-            friction: GROUND_FRICTION,
-            restitution: 0.3,
-          }
-        );
+        handleGroundCollision(workingCreature.particles, {
+          y: groundY,
+          friction: GROUND_FRICTION,
+          restitution: 0.3,
+        });
         
         // Left wall collision
-        workingCreature.particles = handleWallCollision(workingCreature.particles, [
+        handleWallCollision(workingCreature.particles, [
           { x: 0, normal: { x: 1, y: 0 } },
         ]);
         

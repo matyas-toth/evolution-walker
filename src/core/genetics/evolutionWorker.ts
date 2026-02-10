@@ -125,21 +125,16 @@ export class EvolutionWorker {
         return { elites, parents };
       };
 
-      // Arithmetic crossover
-      const arithmeticCrossover = (parent1, parent2, alpha = 0.5) => {
+      // Uniform crossover with fitter-parent bias (60/40) - preserves building blocks
+      const uniformCrossoverWithBias = (parent1, parent2, probabilityFromParent1) => {
         if (parent1.genes.length !== parent2.genes.length) {
           throw new Error('Parent genomes must have the same number of genes');
         }
-        const clampedAlpha = Math.max(0, Math.min(1, alpha));
+        const p = Math.max(0, Math.min(1, probabilityFromParent1));
         const genes = parent1.genes.map((gene1, index) => {
           const gene2 = parent2.genes[index];
           if (!gene2) return gene1;
-          return {
-            muscleId: gene1.muscleId,
-            amplitude: gene1.amplitude * clampedAlpha + gene2.amplitude * (1 - clampedAlpha),
-            frequency: gene1.frequency * clampedAlpha + gene2.frequency * (1 - clampedAlpha),
-            phase: gene1.phase * clampedAlpha + gene2.phase * (1 - clampedAlpha),
-          };
+          return Math.random() < p ? gene1 : gene2;
         });
         return {
           id: \`genome-\${Date.now()}-\${Math.random().toString(36).substr(2, 9)}\`,
@@ -193,7 +188,8 @@ export class EvolutionWorker {
         while (nextGenomes.length < populationSize) {
           const p1 = workerTournamentSelection(parents, 3);
           const p2 = workerTournamentSelection(parents, 3);
-          let offspring = arithmeticCrossover(p1.genome, p2.genome);
+          const probFromP1 = p1.fitness.total >= p2.fitness.total ? 0.6 : 0.4;
+          let offspring = uniformCrossoverWithBias(p1.genome, p2.genome, probFromP1);
           offspring = mutateGenome(offspring, mutationRate, mutationStrength);
           offspring = { ...offspring, generation: currentGeneration + 1 };
           nextGenomes.push(offspring);

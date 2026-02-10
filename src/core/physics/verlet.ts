@@ -4,44 +4,44 @@
  */
 
 import { Particle, Vector2D } from '@/core/types';
-import { subtract, add, multiply } from '@/utils/math';
 
 /**
- * Applies air resistance/damping to particle velocities
+ * Applies air resistance/damping to particle velocities (in-place).
  * @param particles Array of particles to apply damping to
  * @param coefficient Air resistance coefficient (0..1, where 0 = no damping, 1 = full stop)
- * @returns Updated particles array
+ * @returns The same particles array (mutated in place)
  */
 export function applyAirResistance(
   particles: Particle[],
   coefficient: number
 ): Particle[] {
-  return particles.map((particle) => {
-    if (particle.isLocked) return particle;
-    
-    const dampingFactor = 1 - coefficient;
-    const velocity = subtract(particle.pos, particle.oldPos);
-    const dampedVelocity = multiply(velocity, dampingFactor);
-    
-    return {
-      ...particle,
-      oldPos: subtract(particle.pos, dampedVelocity),
-      velocity: dampedVelocity,
-    };
-  });
+  const dampingFactor = 1 - coefficient;
+  for (let i = 0; i < particles.length; i++) {
+    const particle = particles[i];
+    if (particle.isLocked) continue;
+    const vx = particle.pos.x - particle.oldPos.x;
+    const vy = particle.pos.y - particle.oldPos.y;
+    const dampedVx = vx * dampingFactor;
+    const dampedVy = vy * dampingFactor;
+    particle.oldPos.x = particle.pos.x - dampedVx;
+    particle.oldPos.y = particle.pos.y - dampedVy;
+    particle.velocity.x = dampedVx;
+    particle.velocity.y = dampedVy;
+  }
+  return particles;
 }
 
 /**
- * Verlet integration step
+ * Verlet integration step (in-place).
  * Updates particle positions based on forces and previous positions
- * 
+ *
  * Formula: newPos = pos + (pos - oldPos) + acceleration * dt²
- * 
- * @param particles Array of particles to update
+ *
+ * @param particles Array of particles to update (mutated in place)
  * @param forces External forces (e.g., gravity)
  * @param dt Time step (typically 1/60 for 60Hz)
  * @param airResistance Optional air resistance coefficient (0..1)
- * @returns Updated particles array
+ * @returns The same particles array (mutated in place)
  */
 export function integrateVerlet(
   particles: Particle[],
@@ -49,39 +49,30 @@ export function integrateVerlet(
   dt: number,
   airResistance: number = 0
 ): Particle[] {
-  let updatedParticles = particles.map((particle) => {
-    if (particle.isLocked) return particle;
-    
-    // Compute velocity from position difference
-    const velocity = subtract(particle.pos, particle.oldPos);
-    
-    // Compute acceleration from force
-    const acceleration = {
-      x: forces.x / particle.mass,
-      y: forces.y / particle.mass,
-    };
-    
-    // Update position using Verlet formula
-    const newPos = {
-      x: particle.pos.x + velocity.x + acceleration.x * dt * dt,
-      y: particle.pos.y + velocity.y + acceleration.y * dt * dt,
-    };
-    
-    return {
-      ...particle,
-      oldPos: particle.pos,
-      pos: newPos,
-      velocity: {
-        x: velocity.x / dt,
-        y: velocity.y / dt,
-      },
-    };
-  });
-  
-  // Apply air resistance if specified
-  if (airResistance > 0) {
-    updatedParticles = applyAirResistance(updatedParticles, airResistance);
+  const dtSq = dt * dt;
+  for (let i = 0; i < particles.length; i++) {
+    const particle = particles[i];
+    if (particle.isLocked) continue;
+
+    const vx = particle.pos.x - particle.oldPos.x;
+    const vy = particle.pos.y - particle.oldPos.y;
+    const ax = forces.x / particle.mass;
+    const ay = forces.y / particle.mass;
+
+    const newPosX = particle.pos.x + vx + ax * dtSq;
+    const newPosY = particle.pos.y + vy + ay * dtSq;
+
+    particle.oldPos.x = particle.pos.x;
+    particle.oldPos.y = particle.pos.y;
+    particle.pos.x = newPosX;
+    particle.pos.y = newPosY;
+    particle.velocity.x = vx / dt;
+    particle.velocity.y = vy / dt;
   }
-  
-  return updatedParticles;
+
+  if (airResistance > 0) {
+    applyAirResistance(particles, airResistance);
+  }
+
+  return particles;
 }

@@ -12,6 +12,7 @@ import { createCreatureFromTopology, calculateCenterOfMass } from '@/core/simula
 import {
   createInitialPopulation,
   calculateFitness,
+  uniformCrossoverWithBias,
   EvolutionWorker,
   type EvolutionConfig,
   type CreatureData,
@@ -20,7 +21,6 @@ import {
   integrateVerlet,
   updateMuscles,
   satisfyConstraints,
-  createParticleMap,
   handleGroundCollision,
   handleWallCollision,
   checkCreatureTargetZone,
@@ -173,24 +173,24 @@ export default function LearningBasicsShowcase() {
             workingCreature.muscles.forEach((m) => {
               m.stiffness = MUSCLE_STIFFNESS;
             });
-            workingCreature.particles = integrateVerlet(
+            integrateVerlet(
               workingCreature.particles,
               { x: 0, y: GRAVITY },
               FIXED_TIMESTEP,
               0.02
             );
-            const particleMap = createParticleMap(workingCreature.particles);
+            const particleMap = workingCreature.particleMap;
             satisfyConstraints(
               [...workingCreature.constraints, ...workingCreature.muscles],
               particleMap,
               3
             );
-            workingCreature.particles = handleGroundCollision(workingCreature.particles, {
+            handleGroundCollision(workingCreature.particles, {
               y: groundY,
               friction: GROUND_FRICTION,
               restitution: 0.3,
             });
-            workingCreature.particles = handleWallCollision(workingCreature.particles, [
+            handleWallCollision(workingCreature.particles, [
               { x: 0, normal: { x: 1, y: 0 } },
             ]);
             workingCreature.currentPos = calculateCenterOfMass(workingCreature.particles);
@@ -269,22 +269,9 @@ export default function LearningBasicsShowcase() {
           while (nextGenomes.length < POPULATION_SIZE) {
             const p1 = parents[Math.floor(Math.random() * parents.length)];
             const p2 = parents[Math.floor(Math.random() * parents.length)];
-            let offspring = {
-              id: `genome-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-              genes: p1.genome.genes.map((gene1, i) => {
-                const gene2 = p2.genome.genes[i];
-                const alpha = 0.5;
-                return {
-                  muscleId: gene1.muscleId,
-                  amplitude: gene1.amplitude * alpha + gene2.amplitude * (1 - alpha),
-                  frequency: gene1.frequency * alpha + gene2.frequency * (1 - alpha),
-                  phase: gene1.phase * alpha + gene2.phase * (1 - alpha),
-                };
-              }),
-              generation: currentGen + 1,
-              parentIds: [p1.genome.id, p2.genome.id],
-              createdAt: Date.now(),
-            };
+            const probFromP1 = p1.fitness.total >= p2.fitness.total ? 0.6 : 0.4;
+            let offspring = uniformCrossoverWithBias(p1.genome, p2.genome, probFromP1);
+            offspring = { ...offspring, generation: currentGen + 1 };
             // Mutation
             offspring.genes = offspring.genes.map((gene) => {
               if (Math.random() > MUTATION_RATE) return gene;
@@ -383,24 +370,24 @@ export default function LearningBasicsShowcase() {
           workingCreature.muscles.forEach((m) => {
             m.stiffness = MUSCLE_STIFFNESS;
           });
-          workingCreature.particles = integrateVerlet(
+          integrateVerlet(
             workingCreature.particles,
             { x: 0, y: GRAVITY },
             FIXED_TIMESTEP,
             0.02
           );
-          const particleMap = createParticleMap(workingCreature.particles);
+          const particleMap = workingCreature.particleMap;
           satisfyConstraints(
             [...workingCreature.constraints, ...workingCreature.muscles],
             particleMap,
             3
           );
-          workingCreature.particles = handleGroundCollision(workingCreature.particles, {
+          handleGroundCollision(workingCreature.particles, {
             y: groundY,
             friction: GROUND_FRICTION,
             restitution: 0.3,
           });
-          workingCreature.particles = handleWallCollision(workingCreature.particles, [
+          handleWallCollision(workingCreature.particles, [
             { x: 0, normal: { x: 1, y: 0 } },
           ]);
           workingCreature.currentPos = calculateCenterOfMass(workingCreature.particles);
@@ -502,24 +489,24 @@ export default function LearningBasicsShowcase() {
             workingCreature.muscles.forEach((m) => {
               m.stiffness = MUSCLE_STIFFNESS;
             });
-            workingCreature.particles = integrateVerlet(
+            integrateVerlet(
               workingCreature.particles,
               { x: 0, y: GRAVITY },
               FIXED_TIMESTEP,
               0.02
             );
-            const particleMap = createParticleMap(workingCreature.particles);
+            const particleMap = workingCreature.particleMap;
             satisfyConstraints(
               [...workingCreature.constraints, ...workingCreature.muscles],
               particleMap,
               3
             );
-            workingCreature.particles = handleGroundCollision(workingCreature.particles, {
+            handleGroundCollision(workingCreature.particles, {
               y: groundY,
               friction: GROUND_FRICTION,
               restitution: 0.3,
             });
-            workingCreature.particles = handleWallCollision(workingCreature.particles, [
+            handleWallCollision(workingCreature.particles, [
               { x: 0, normal: { x: 1, y: 0 } },
             ]);
             workingCreature.currentPos = calculateCenterOfMass(workingCreature.particles);

@@ -5,105 +5,73 @@
 
 import { Particle, Ground, Wall, Creature } from '@/core/types';
 
+const PRESERVE_UPWARD_DAMP = 0.95; // slight decay to avoid runaway bounces
+const APPROX_DT = 0.016;
+
 /**
- * Handles ground collisions
+ * Handles ground collisions (in-place).
  * Prevents particles from falling through the ground and applies friction
- * 
- * @param particles Array of particles to check
+ *
+ * @param particles Array of particles to check (mutated in place)
  * @param ground Ground definition with y coordinate, friction, and restitution
- * @returns Updated particles array with collision corrections applied
+ * @returns The same particles array (mutated in place)
  */
 export function handleGroundCollision(
   particles: Particle[],
   ground: Ground
 ): Particle[] {
-  return particles.map((particle) => {
-    if (particle.isLocked) return particle;
-    
-    if (particle.pos.y > ground.y - particle.radius) {
-      // Collision detected
-      const penetration = ground.y - particle.radius - particle.pos.y;
-      
-      // Correct position
-      const newPos = {
-        x: particle.pos.x,
-        y: ground.y - particle.radius,
-      };
-      
-      // Calculate velocity from position difference
-      const velocity = {
-        x: particle.pos.x - particle.oldPos.x,
-        y: particle.pos.y - particle.oldPos.y,
-      };
-      
-      // Apply friction to horizontal velocity
-      const frictionForce = velocity.x * ground.friction;
-      
-      // Vertical: preserve upward (constraint push-off) or apply restitution (impact)
-      const PRESERVE_UPWARD_DAMP = 0.95; // slight decay to avoid runaway bounces
-      const newOldPosY =
-        velocity.y < 0
-          ? newPos.y - velocity.y * PRESERVE_UPWARD_DAMP // preserve upward so legs can push
-          : newPos.y + velocity.y * ground.restitution; // bounce on impact
-      const newOldPos = {
-        x: newPos.x - velocity.x + frictionForce,
-        y: newOldPosY,
-      };
-      
-      return {
-        ...particle,
-        pos: newPos,
-        oldPos: newOldPos,
-        velocity: {
-          x: (newPos.x - newOldPos.x) / 0.016, // Approximate dt
-          y: (newPos.y - newOldPos.y) / 0.016,
-        },
-      };
-    }
-    
-    return particle;
-  });
+  for (let i = 0; i < particles.length; i++) {
+    const particle = particles[i];
+    if (particle.isLocked) continue;
+    if (particle.pos.y <= ground.y - particle.radius) continue;
+
+    // Collision detected
+    const newPosY = ground.y - particle.radius;
+    const vx = particle.pos.x - particle.oldPos.x;
+    const vy = particle.pos.y - particle.oldPos.y;
+    const frictionForce = vx * ground.friction;
+    const newOldPosY =
+      vy < 0
+        ? newPosY - vy * PRESERVE_UPWARD_DAMP
+        : newPosY + vy * ground.restitution;
+    const newOldPosX = particle.pos.x - vx + frictionForce;
+
+    particle.pos.y = newPosY;
+    particle.oldPos.x = newOldPosX;
+    particle.oldPos.y = newOldPosY;
+    particle.velocity.x = (particle.pos.x - particle.oldPos.x) / APPROX_DT;
+    particle.velocity.y = (particle.pos.y - particle.oldPos.y) / APPROX_DT;
+  }
+  return particles;
 }
 
 /**
- * Handles wall collisions
+ * Handles wall collisions (in-place).
  * Prevents particles from passing through walls and reflects velocity
- * 
- * @param particles Array of particles to check
+ *
+ * @param particles Array of particles to check (mutated in place)
  * @param walls Array of wall definitions
- * @returns Updated particles array with collision corrections applied
+ * @returns The same particles array (mutated in place)
  */
 export function handleWallCollision(
   particles: Particle[],
   walls: Wall[]
 ): Particle[] {
-  return particles.map((particle) => {
-    if (particle.isLocked) return particle;
-    
-    walls.forEach((wall) => {
-      // Simple AABB collision detection
+  for (let i = 0; i < particles.length; i++) {
+    const particle = particles[i];
+    if (particle.isLocked) continue;
+    for (let w = 0; w < walls.length; w++) {
+      const wall = walls[w];
       const distToWall = particle.pos.x - wall.x;
       const absDist = Math.abs(distToWall);
-      
-      // Check if particle is colliding with wall
       if (absDist < particle.radius && distToWall * wall.normal.x < 0) {
-        // Collision detected
-        // Correct position
         particle.pos.x = wall.x + wall.normal.x * particle.radius;
-        
-        // Reflect velocity
-        const velocity = {
-          x: particle.pos.x - particle.oldPos.x,
-          y: particle.pos.y - particle.oldPos.y,
-        };
-        
-        // Reflect horizontal velocity component
-        particle.oldPos.x = particle.pos.x - velocity.x * 0.5;
+        const vx = particle.pos.x - particle.oldPos.x;
+        particle.oldPos.x = particle.pos.x - vx * 0.5;
       }
-    });
-    
-    return particle;
-  });
+    }
+  }
+  return particles;
 }
 
 /**

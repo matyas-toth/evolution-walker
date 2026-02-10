@@ -14,7 +14,6 @@ import {
   integrateVerlet,
   updateMuscles,
   satisfyConstraints,
-  createParticleMap,
   handleGroundCollision,
   handleWallCollision,
   checkCreatureTargetZone,
@@ -135,7 +134,7 @@ export default function PhysicsEngineShowcase() {
         });
         
         // Verlet integration
-        workingCreature.particles = integrateVerlet(
+        integrateVerlet(
           workingCreature.particles,
           { x: 0, y: gravity },
           FIXED_TIMESTEP,
@@ -143,7 +142,7 @@ export default function PhysicsEngineShowcase() {
         );
         
         // Satisfy constraints
-        const particleMap = createParticleMap(workingCreature.particles);
+        const particleMap = workingCreature.particleMap;
         const allConstraints = [
           ...workingCreature.constraints,
           ...workingCreature.muscles,
@@ -151,14 +150,14 @@ export default function PhysicsEngineShowcase() {
         satisfyConstraints(allConstraints, particleMap, 3);
         
         // Handle collisions
-        workingCreature.particles = handleGroundCollision(workingCreature.particles, {
+        handleGroundCollision(workingCreature.particles, {
           y: groundY,
           friction: groundFriction,
           restitution: 0.3,
         });
         
         // Left wall collision
-        workingCreature.particles = handleWallCollision(workingCreature.particles, [
+        handleWallCollision(workingCreature.particles, [
           { x: 0, normal: { x: 1, y: 0 } },
         ]);
         

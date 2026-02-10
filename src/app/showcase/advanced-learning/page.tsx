@@ -13,6 +13,7 @@ import { createCreatureFromTopology, calculateCenterOfMass } from '@/core/simula
 import {
   createInitialPopulation,
   calculateFitnessAdvanced,
+  sbxCrossover,
   EvolutionWorker,
   type EvolutionConfig,
   type CreatureData,
@@ -21,7 +22,6 @@ import {
   integrateVerlet,
   updateMuscles,
   satisfyConstraints,
-  createParticleMap,
   handleGroundCollision,
   handleWallCollision,
   checkCreatureTargetZone,
@@ -36,14 +36,15 @@ import { Creature } from '@/core/types';
 
 const FIXED_TIMESTEP = 1 / 60;
 const GRAVITY = 200;
-const MUSCLE_STIFFNESS = 0.8;
+const MUSCLE_STIFFNESS = 0.9;
 const GROUND_FRICTION = 0.7;
 const POPULATION_SIZE = 1000;
-const GENERATION_DURATION = 15;
-const ELITISM_COUNT = 2;
+const GENERATION_DURATION = 10;
+const ELITISM_COUNT = 1;
 const PARENTS_TOP_PERCENT = 0.2;
-const MUTATION_RATE = 0.05;
-const MUTATION_STRENGTH = 0.25;
+const MUTATION_RATE = 0.12;
+const MUTATION_STRENGTH = 0.42;
+const SBX_ETA = 10;
 const TOP_DISPLAY_COUNT = 5;
 
 type Phase = 'running' | 'evaluating' | 'evolving' | 'replay' | 'winner';
@@ -61,11 +62,22 @@ export default function AdvancedLearningShowcase() {
   const generationTimeRef = useRef<number>(0);
   const lastStateUpdateRef = useRef<number>(0);
   const frameCountRef = useRef<number>(0);
+  const phaseEnteredAtRef = useRef<number>(0);
 
   const creaturesRef = useRef<Creature[]>([]);
   const creatureColorsRef = useRef<string[]>([]);
   const phaseRef = useRef<Phase>('running');
   const winnerCreatureRef = useRef<Creature | null>(null);
+
+  function logPhaseSwitch(toPhase: Phase): void {
+    const fromPhase = phaseRef.current;
+    const elapsedMs = performance.now() - phaseEnteredAtRef.current;
+    const elapsedS = (elapsedMs / 1000).toFixed(2);
+    console.log(
+      `[Advanced Learning] Switching phase: ${fromPhase} -> ${toPhase}, took ${elapsedS}s`
+    );
+    phaseEnteredAtRef.current = performance.now();
+  }
   const generationRef = useRef<number>(0);
   const speedMultiplierRef = useRef<number>(1);
   const replayCreatureRef = useRef<Creature | null>(null);
@@ -104,6 +116,7 @@ export default function AdvancedLearningShowcase() {
     creatureColorsRef.current = colors;
     phaseRef.current = 'running';
     setPhase('running');
+    phaseEnteredAtRef.current = performance.now();
     winnerCreatureRef.current = null;
     setWinnerCreature(null);
     replayCreatureRef.current = null;
@@ -179,24 +192,24 @@ export default function AdvancedLearningShowcase() {
             workingCreature.muscles.forEach((m) => {
               m.stiffness = MUSCLE_STIFFNESS;
             });
-            workingCreature.particles = integrateVerlet(
+            integrateVerlet(
               workingCreature.particles,
               { x: 0, y: GRAVITY },
               FIXED_TIMESTEP,
               0.02
             );
-            const particleMap = createParticleMap(workingCreature.particles);
+            const particleMap = workingCreature.particleMap;
             satisfyConstraints(
               [...workingCreature.constraints, ...workingCreature.muscles],
               particleMap,
               3
             );
-            workingCreature.particles = handleGroundCollision(workingCreature.particles, {
+            handleGroundCollision(workingCreature.particles, {
               y: groundY,
               friction: GROUND_FRICTION,
               restitution: 0.3,
             });
-            workingCreature.particles = handleWallCollision(workingCreature.particles, [
+            handleWallCollision(workingCreature.particles, [
               { x: 0, normal: { x: 1, y: 0 } },
             ]);
             checkHeadGroundAndKill(workingCreature, groundY);
@@ -253,9 +266,11 @@ export default function AdvancedLearningShowcase() {
             );
             totalSimTimeRef.current = 0;
             timeAccumulatorRef.current = 0;
+            logPhaseSwitch('replay');
             phaseRef.current = 'replay';
             setPhase('replay');
           } else {
+            logPhaseSwitch('evolving');
             phaseRef.current = 'evolving';
             setPhase('evolving');
           }
@@ -282,22 +297,8 @@ export default function AdvancedLearningShowcase() {
           while (nextGenomes.length < POPULATION_SIZE) {
             const p1 = parents[Math.floor(Math.random() * parents.length)];
             const p2 = parents[Math.floor(Math.random() * parents.length)];
-            let offspring = {
-              id: `genome-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-              genes: p1.genome.genes.map((gene1, i) => {
-                const gene2 = p2.genome.genes[i];
-                const alpha = 0.5;
-                return {
-                  muscleId: gene1.muscleId,
-                  amplitude: gene1.amplitude * alpha + gene2.amplitude * (1 - alpha),
-                  frequency: gene1.frequency * alpha + gene2.frequency * (1 - alpha),
-                  phase: gene1.phase * alpha + gene2.phase * (1 - alpha),
-                };
-              }),
-              generation: currentGen + 1,
-              parentIds: [p1.genome.id, p2.genome.id],
-              createdAt: Date.now(),
-            };
+            let offspring = sbxCrossover(p1.genome, p2.genome, SBX_ETA);
+            offspring = { ...offspring, generation: currentGen + 1 };
             offspring.genes = offspring.genes.map((gene) => {
               if (Math.random() > MUTATION_RATE) return gene;
               const change = (Math.random() - 0.5) * 2 * MUTATION_STRENGTH;
@@ -321,6 +322,7 @@ export default function AdvancedLearningShowcase() {
           totalSimTimeRef.current = 0;
           timeAccumulatorRef.current = 0;
           lastStateUpdateRef.current = 0;
+          logPhaseSwitch('running');
           phaseRef.current = 'running';
           setPhase('running');
           setCreatures([...newCreatures]);
@@ -347,6 +349,7 @@ export default function AdvancedLearningShowcase() {
           .then((output) => {
             if (output.error) {
               console.error('Evolution error:', output.error);
+              logPhaseSwitch('evolving');
               phaseRef.current = 'evolving';
               animationFrameRef.current = requestAnimationFrame(update);
               return;
@@ -363,6 +366,7 @@ export default function AdvancedLearningShowcase() {
             totalSimTimeRef.current = 0;
             timeAccumulatorRef.current = 0;
             lastStateUpdateRef.current = 0;
+            logPhaseSwitch('running');
             phaseRef.current = 'running';
             setPhase('running');
             setCreatures([...newCreatures]);
@@ -370,6 +374,7 @@ export default function AdvancedLearningShowcase() {
           })
           .catch((error) => {
             console.error('Evolution worker failed:', error);
+            logPhaseSwitch('evolving');
             phaseRef.current = 'evolving';
             animationFrameRef.current = requestAnimationFrame(update);
           });
@@ -391,24 +396,24 @@ export default function AdvancedLearningShowcase() {
           workingCreature.muscles.forEach((m) => {
             m.stiffness = MUSCLE_STIFFNESS;
           });
-          workingCreature.particles = integrateVerlet(
+          integrateVerlet(
             workingCreature.particles,
             { x: 0, y: GRAVITY },
             FIXED_TIMESTEP,
             0.02
           );
-          const particleMap = createParticleMap(workingCreature.particles);
+          const particleMap = workingCreature.particleMap;
           satisfyConstraints(
             [...workingCreature.constraints, ...workingCreature.muscles],
             particleMap,
             3
           );
-          workingCreature.particles = handleGroundCollision(workingCreature.particles, {
+          handleGroundCollision(workingCreature.particles, {
             y: groundY,
             friction: GROUND_FRICTION,
             restitution: 0.3,
           });
-          workingCreature.particles = handleWallCollision(workingCreature.particles, [
+          handleWallCollision(workingCreature.particles, [
             { x: 0, normal: { x: 1, y: 0 } },
           ]);
           checkHeadGroundAndKill(workingCreature, groundY);
@@ -433,6 +438,7 @@ export default function AdvancedLearningShowcase() {
           if (workingCreature.reachedTarget) {
             winnerCreatureRef.current = workingCreature;
             setWinnerCreature(workingCreature);
+            logPhaseSwitch('winner');
             phaseRef.current = 'winner';
             setPhase('winner');
             ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -527,24 +533,24 @@ export default function AdvancedLearningShowcase() {
             workingCreature.muscles.forEach((m) => {
               m.stiffness = MUSCLE_STIFFNESS;
             });
-            workingCreature.particles = integrateVerlet(
+            integrateVerlet(
               workingCreature.particles,
               { x: 0, y: GRAVITY },
               FIXED_TIMESTEP,
               0.02
             );
-            const particleMap = createParticleMap(workingCreature.particles);
+            const particleMap = workingCreature.particleMap;
             satisfyConstraints(
               [...workingCreature.constraints, ...workingCreature.muscles],
               particleMap,
               3
             );
-            workingCreature.particles = handleGroundCollision(workingCreature.particles, {
+            handleGroundCollision(workingCreature.particles, {
               y: groundY,
               friction: GROUND_FRICTION,
               restitution: 0.3,
             });
-            workingCreature.particles = handleWallCollision(workingCreature.particles, [
+            handleWallCollision(workingCreature.particles, [
               { x: 0, normal: { x: 1, y: 0 } },
             ]);
             checkHeadGroundAndKill(workingCreature, groundY);
@@ -569,6 +575,7 @@ export default function AdvancedLearningShowcase() {
           timeAccumulatorRef.current -= FIXED_TIMESTEP;
 
           if (generationTimeRef.current >= GENERATION_DURATION) {
+            logPhaseSwitch('evaluating');
             phaseRef.current = 'evaluating';
             setPhase('evaluating');
             break;
@@ -713,6 +720,7 @@ export default function AdvancedLearningShowcase() {
               <div>Generation duration: {GENERATION_DURATION}s</div>
               <div>Elitism: {ELITISM_COUNT}</div>
               <div>Mutation: {(MUTATION_RATE * 100).toFixed(0)}%</div>
+              <div>Crossover: SBX (η={SBX_ETA})</div>
               <div>Fitness: distance + upright (head height)</div>
               <div>Head touch ground = dead</div>
             </div>

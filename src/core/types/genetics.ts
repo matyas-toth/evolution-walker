@@ -78,6 +78,9 @@ export interface Creature {
   
   /** Physical particles (mass points) */
   particles: Particle[];
+
+  /** Map of particle id to particle for constraint lookup (reused each step) */
+  particleMap: Map<string, Particle>;
   
   /** Passive constraints (bones, rigid connections) */
   constraints: Constraint[];
