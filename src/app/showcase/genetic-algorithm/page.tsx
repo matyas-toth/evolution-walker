@@ -12,11 +12,7 @@ import { createCreatureFromTopology, calculateCenterOfMass } from '@/core/simula
 import { createRandomGenome } from '@/core/genetics';
 import { calculateFitness } from '@/core/genetics';
 import {
-  integrateVerlet,
-  updateMuscles,
-  satisfyConstraints,
-  handleGroundCollision,
-  handleWallCollision,
+  stepPhysics,
   checkCreatureTargetZone,
 } from '@/core/physics';
 import { renderCreature, renderGround, renderTargetZone } from '@/components/creatures/CreatureRenderer';
@@ -134,41 +130,18 @@ export default function GeneticAlgorithmShowcase() {
         // Get latest creature from ref
         const workingCreature: Creature = { ...currentCreature };
         
-        // Update muscles (genome-driven oscillation)
-        updateMuscles(workingCreature.muscles, totalSimTimeRef.current);
-        
         // Update muscle stiffness
         workingCreature.muscles.forEach((muscle) => {
           muscle.stiffness = MUSCLE_STIFFNESS;
         });
         
-        // Verlet integration
-        integrateVerlet(
-          workingCreature.particles,
-          { x: 0, y: GRAVITY },
+        stepPhysics(
+          workingCreature,
+          { y: groundY, friction: GROUND_FRICTION, restitution: 0.3 },
+          [{ x: 0, normal: { x: 1, y: 0 } }],
           FIXED_TIMESTEP,
-          0.02 // Air resistance
+          { forceY: GRAVITY, airResistance: 0.02, time: totalSimTimeRef.current, constraintIterations: 3 }
         );
-        
-        // Satisfy constraints
-        const particleMap = workingCreature.particleMap;
-        const allConstraints = [
-          ...workingCreature.constraints,
-          ...workingCreature.muscles,
-        ];
-        satisfyConstraints(allConstraints, particleMap, 3);
-        
-        // Handle collisions
-        handleGroundCollision(workingCreature.particles, {
-          y: groundY,
-          friction: GROUND_FRICTION,
-          restitution: 0.3,
-        });
-        
-        // Left wall collision
-        handleWallCollision(workingCreature.particles, [
-          { x: 0, normal: { x: 1, y: 0 } },
-        ]);
         
         // Recalculate center of mass
         workingCreature.currentPos = calculateCenterOfMass(workingCreature.particles);

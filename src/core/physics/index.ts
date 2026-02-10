@@ -24,3 +24,9 @@ export {
   checkCreatureTargetZone,
   checkHeadGroundAndKill,
 } from './collisions';
+
+// Unified step (WASM when available, TS fallback)
+export { stepPhysics, type StepPhysicsOptions } from './stepPhysics';
+
+// WASM glue (optional preload)
+export { loadPhysicsWasm, isPhysicsWasmReady } from './wasmGlue';

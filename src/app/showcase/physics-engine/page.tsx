@@ -11,11 +11,7 @@ import { STICKMAN_TOPOLOGY } from '@/core/topology';
 import { createCreatureFromTopology, calculateCenterOfMass } from '@/core/simulation/creature';
 import { createDefaultConfig } from '@/core/simulation/utils';
 import {
-  integrateVerlet,
-  updateMuscles,
-  satisfyConstraints,
-  handleGroundCollision,
-  handleWallCollision,
+  stepPhysics,
   checkCreatureTargetZone,
 } from '@/core/physics';
 import { renderCreature, renderGround, renderTargetZone } from '@/components/creatures/CreatureRenderer';
@@ -119,13 +115,7 @@ export default function PhysicsEngineShowcase() {
         // Create a working copy of the creature
         const workingCreature = { ...creature };
         
-        // Update manual muscle controls
-        applyManualMuscleControl(workingCreature.muscles);
-        
-        // Update muscles (oscillation - but manual control overrides)
-        updateMuscles(workingCreature.muscles, timeAccumulatorRef.current);
-        
-        // Apply manual control again (in case updateMuscles overwrote it)
+        // Manual muscle controls (used as currentLength for this step)
         applyManualMuscleControl(workingCreature.muscles);
         
         // Update muscle stiffness
@@ -133,33 +123,13 @@ export default function PhysicsEngineShowcase() {
           muscle.stiffness = muscleStiffness;
         });
         
-        // Verlet integration
-        integrateVerlet(
-          workingCreature.particles,
-          { x: 0, y: gravity },
+        stepPhysics(
+          workingCreature,
+          { y: groundY, friction: groundFriction, restitution: 0.3 },
+          [{ x: 0, normal: { x: 1, y: 0 } }],
           FIXED_TIMESTEP,
-          0.02 // Air resistance
+          { forceY: gravity, airResistance: 0.02, time: timeAccumulatorRef.current, constraintIterations: 3, skipMuscleUpdate: true }
         );
-        
-        // Satisfy constraints
-        const particleMap = workingCreature.particleMap;
-        const allConstraints = [
-          ...workingCreature.constraints,
-          ...workingCreature.muscles,
-        ];
-        satisfyConstraints(allConstraints, particleMap, 3);
-        
-        // Handle collisions
-        handleGroundCollision(workingCreature.particles, {
-          y: groundY,
-          friction: groundFriction,
-          restitution: 0.3,
-        });
-        
-        // Left wall collision
-        handleWallCollision(workingCreature.particles, [
-          { x: 0, normal: { x: 1, y: 0 } },
-        ]);
         
         // Recalculate center of mass
         workingCreature.currentPos = calculateCenterOfMass(workingCreature.particles);

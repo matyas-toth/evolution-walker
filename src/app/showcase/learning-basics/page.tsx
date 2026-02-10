@@ -18,11 +18,7 @@ import {
   type CreatureData,
 } from '@/core/genetics';
 import {
-  integrateVerlet,
-  updateMuscles,
-  satisfyConstraints,
-  handleGroundCollision,
-  handleWallCollision,
+  stepPhysics,
   checkCreatureTargetZone,
 } from '@/core/physics';
 import { renderCreature, renderGround, renderTargetZone } from '@/components/creatures/CreatureRenderer';
@@ -169,30 +165,16 @@ export default function LearningBasicsShowcase() {
           const list = creaturesRef.current;
           for (let i = 0; i < list.length; i++) {
             const workingCreature: Creature = { ...list[i] };
-            updateMuscles(workingCreature.muscles, totalSimTimeRef.current);
             workingCreature.muscles.forEach((m) => {
               m.stiffness = MUSCLE_STIFFNESS;
             });
-            integrateVerlet(
-              workingCreature.particles,
-              { x: 0, y: GRAVITY },
+            stepPhysics(
+              workingCreature,
+              { y: groundY, friction: GROUND_FRICTION, restitution: 0.3 },
+              [{ x: 0, normal: { x: 1, y: 0 } }],
               FIXED_TIMESTEP,
-              0.02
+              { forceY: GRAVITY, airResistance: 0.02, time: totalSimTimeRef.current, constraintIterations: 3 }
             );
-            const particleMap = workingCreature.particleMap;
-            satisfyConstraints(
-              [...workingCreature.constraints, ...workingCreature.muscles],
-              particleMap,
-              3
-            );
-            handleGroundCollision(workingCreature.particles, {
-              y: groundY,
-              friction: GROUND_FRICTION,
-              restitution: 0.3,
-            });
-            handleWallCollision(workingCreature.particles, [
-              { x: 0, normal: { x: 1, y: 0 } },
-            ]);
             workingCreature.currentPos = calculateCenterOfMass(workingCreature.particles);
             workingCreature.maxDistance = Math.max(
               workingCreature.maxDistance,
@@ -366,30 +348,16 @@ export default function LearningBasicsShowcase() {
         timeAccumulatorRef.current += replayDelta;
         while (timeAccumulatorRef.current >= FIXED_TIMESTEP) {
           const workingCreature: Creature = { ...replayCreatureRef.current! };
-          updateMuscles(workingCreature.muscles, totalSimTimeRef.current);
           workingCreature.muscles.forEach((m) => {
             m.stiffness = MUSCLE_STIFFNESS;
           });
-          integrateVerlet(
-            workingCreature.particles,
-            { x: 0, y: GRAVITY },
+          stepPhysics(
+            workingCreature,
+            { y: groundY, friction: GROUND_FRICTION, restitution: 0.3 },
+            [{ x: 0, normal: { x: 1, y: 0 } }],
             FIXED_TIMESTEP,
-            0.02
+            { forceY: GRAVITY, airResistance: 0.02, time: totalSimTimeRef.current, constraintIterations: 3 }
           );
-          const particleMap = workingCreature.particleMap;
-          satisfyConstraints(
-            [...workingCreature.constraints, ...workingCreature.muscles],
-            particleMap,
-            3
-          );
-          handleGroundCollision(workingCreature.particles, {
-            y: groundY,
-            friction: GROUND_FRICTION,
-            restitution: 0.3,
-          });
-          handleWallCollision(workingCreature.particles, [
-            { x: 0, normal: { x: 1, y: 0 } },
-          ]);
           workingCreature.currentPos = calculateCenterOfMass(workingCreature.particles);
           workingCreature.maxDistance = Math.max(
             workingCreature.maxDistance,
@@ -485,30 +453,16 @@ export default function LearningBasicsShowcase() {
           const list = creaturesRef.current;
           for (let i = 0; i < list.length; i++) {
             const workingCreature: Creature = { ...list[i] };
-            updateMuscles(workingCreature.muscles, totalSimTimeRef.current);
             workingCreature.muscles.forEach((m) => {
               m.stiffness = MUSCLE_STIFFNESS;
             });
-            integrateVerlet(
-              workingCreature.particles,
-              { x: 0, y: GRAVITY },
+            stepPhysics(
+              workingCreature,
+              { y: groundY, friction: GROUND_FRICTION, restitution: 0.3 },
+              [{ x: 0, normal: { x: 1, y: 0 } }],
               FIXED_TIMESTEP,
-              0.02
+              { forceY: GRAVITY, airResistance: 0.02, time: totalSimTimeRef.current, constraintIterations: 3 }
             );
-            const particleMap = workingCreature.particleMap;
-            satisfyConstraints(
-              [...workingCreature.constraints, ...workingCreature.muscles],
-              particleMap,
-              3
-            );
-            handleGroundCollision(workingCreature.particles, {
-              y: groundY,
-              friction: GROUND_FRICTION,
-              restitution: 0.3,
-            });
-            handleWallCollision(workingCreature.particles, [
-              { x: 0, normal: { x: 1, y: 0 } },
-            ]);
             workingCreature.currentPos = calculateCenterOfMass(workingCreature.particles);
             workingCreature.maxDistance = Math.max(
               workingCreature.maxDistance,

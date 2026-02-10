@@ -19,11 +19,8 @@ import {
   type CreatureData,
 } from '@/core/genetics';
 import {
-  integrateVerlet,
-  updateMuscles,
-  satisfyConstraints,
-  handleGroundCollision,
-  handleWallCollision,
+  stepPhysics,
+  loadPhysicsWasm,
   checkCreatureTargetZone,
   checkHeadGroundAndKill,
 } from '@/core/physics';
@@ -96,6 +93,11 @@ export default function AdvancedLearningShowcase() {
   useEffect(() => {
     speedMultiplierRef.current = Math.max(0.1, Math.min(100, speedMultiplier));
   }, [speedMultiplier]);
+
+  // Preload WASM physics so stepPhysics uses it when ready
+  useEffect(() => {
+    loadPhysicsWasm();
+  }, []);
 
   const groundY = typeof window !== 'undefined' ? window.innerHeight * 0.8 : 600;
   const targetZone = {
@@ -188,30 +190,16 @@ export default function AdvancedLearningShowcase() {
               list[i] = workingCreature;
               continue;
             }
-            updateMuscles(workingCreature.muscles, totalSimTimeRef.current);
             workingCreature.muscles.forEach((m) => {
               m.stiffness = MUSCLE_STIFFNESS;
             });
-            integrateVerlet(
-              workingCreature.particles,
-              { x: 0, y: GRAVITY },
+            stepPhysics(
+              workingCreature,
+              { y: groundY, friction: GROUND_FRICTION, restitution: 0.3 },
+              [{ x: 0, normal: { x: 1, y: 0 } }],
               FIXED_TIMESTEP,
-              0.02
+              { forceY: GRAVITY, airResistance: 0.02, time: totalSimTimeRef.current, constraintIterations: 3 }
             );
-            const particleMap = workingCreature.particleMap;
-            satisfyConstraints(
-              [...workingCreature.constraints, ...workingCreature.muscles],
-              particleMap,
-              3
-            );
-            handleGroundCollision(workingCreature.particles, {
-              y: groundY,
-              friction: GROUND_FRICTION,
-              restitution: 0.3,
-            });
-            handleWallCollision(workingCreature.particles, [
-              { x: 0, normal: { x: 1, y: 0 } },
-            ]);
             checkHeadGroundAndKill(workingCreature, groundY);
             const head = workingCreature.particles.find((p) => p.id === 'head');
             if (head) {
@@ -392,30 +380,16 @@ export default function AdvancedLearningShowcase() {
         timeAccumulatorRef.current += replayDelta;
         while (timeAccumulatorRef.current >= FIXED_TIMESTEP) {
           const workingCreature: Creature = { ...replayCreatureRef.current! };
-          updateMuscles(workingCreature.muscles, totalSimTimeRef.current);
           workingCreature.muscles.forEach((m) => {
             m.stiffness = MUSCLE_STIFFNESS;
           });
-          integrateVerlet(
-            workingCreature.particles,
-            { x: 0, y: GRAVITY },
+          stepPhysics(
+            workingCreature,
+            { y: groundY, friction: GROUND_FRICTION, restitution: 0.3 },
+            [{ x: 0, normal: { x: 1, y: 0 } }],
             FIXED_TIMESTEP,
-            0.02
+            { forceY: GRAVITY, airResistance: 0.02, time: totalSimTimeRef.current, constraintIterations: 3 }
           );
-          const particleMap = workingCreature.particleMap;
-          satisfyConstraints(
-            [...workingCreature.constraints, ...workingCreature.muscles],
-            particleMap,
-            3
-          );
-          handleGroundCollision(workingCreature.particles, {
-            y: groundY,
-            friction: GROUND_FRICTION,
-            restitution: 0.3,
-          });
-          handleWallCollision(workingCreature.particles, [
-            { x: 0, normal: { x: 1, y: 0 } },
-          ]);
           checkHeadGroundAndKill(workingCreature, groundY);
           const head = workingCreature.particles.find((p) => p.id === 'head');
           if (head) {
@@ -529,30 +503,16 @@ export default function AdvancedLearningShowcase() {
               list[i] = workingCreature;
               continue;
             }
-            updateMuscles(workingCreature.muscles, totalSimTimeRef.current);
             workingCreature.muscles.forEach((m) => {
               m.stiffness = MUSCLE_STIFFNESS;
             });
-            integrateVerlet(
-              workingCreature.particles,
-              { x: 0, y: GRAVITY },
+            stepPhysics(
+              workingCreature,
+              { y: groundY, friction: GROUND_FRICTION, restitution: 0.3 },
+              [{ x: 0, normal: { x: 1, y: 0 } }],
               FIXED_TIMESTEP,
-              0.02
+              { forceY: GRAVITY, airResistance: 0.02, time: totalSimTimeRef.current, constraintIterations: 3 }
             );
-            const particleMap = workingCreature.particleMap;
-            satisfyConstraints(
-              [...workingCreature.constraints, ...workingCreature.muscles],
-              particleMap,
-              3
-            );
-            handleGroundCollision(workingCreature.particles, {
-              y: groundY,
-              friction: GROUND_FRICTION,
-              restitution: 0.3,
-            });
-            handleWallCollision(workingCreature.particles, [
-              { x: 0, normal: { x: 1, y: 0 } },
-            ]);
             checkHeadGroundAndKill(workingCreature, groundY);
             const head = workingCreature.particles.find((p) => p.id === 'head');
             if (head) {
