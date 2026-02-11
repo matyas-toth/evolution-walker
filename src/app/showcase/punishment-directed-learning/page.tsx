@@ -1,10 +1,10 @@
 'use client';
 
 /**
- * Advanced Learning Showcase
- * Evolution with fitness = distance (primary) + upright/head-height bonus (secondary).
- * Head touching ground kills the creature and freezes its simulation.
- * @module app/showcase/advanced-learning/page
+ * Punishment-Directed Learning Showcase
+ * Evolution with airborne penalty and head-height stability reward.
+ * Creatures must walk (feet on ground) and keep head stable to score well.
+ * @module app/showcase/punishment-directed-learning/page
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -12,7 +12,6 @@ import { STICKMAN_TOPOLOGY } from '@/core/topology';
 import { createCreatureFromTopology, calculateCenterOfMass } from '@/core/simulation/creature';
 import {
   createInitialPopulation,
-  calculateFitnessAdvanced,
   sbxCrossover,
   EvolutionWorker,
   type EvolutionConfig,
@@ -46,13 +45,53 @@ const MUTATION_STRENGTH = 0.42;
 const SBX_ETA = 10;
 const TOP_DISPLAY_COUNT = 5;
 
+const LEFT_FOOT_IDX = 7;  // l-foot in stickman topology
+const RIGHT_FOOT_IDX = 9; // r-foot in stickman topology
+
+function calculateFitnessPunishment(
+  creature: Creature,
+  targetZone: { x: number; y: number; width: number; height: number },
+  startX: number,
+  groundY: number
+): { total: number; distance: number; targetBonus: number; efficiency: number; stability: number } {
+  const distance = creature.maxDistance - startX;
+  const targetBonus = creature.reachedTarget ? 200 : 0;
+  const deathPenalty = creature.isDead ? -50 : 0;
+
+  const totalSteps = creature.totalSteps ?? 1;
+  const airborneSteps = creature.airborneSteps ?? 0;
+  const airborneRatio = airborneSteps / totalSteps;
+  const airbornePenalty = -airborneRatio * 100;
+
+  let headStabilityBonus = 0;
+  if (totalSteps > 1 && creature.headYSum !== undefined && creature.headYSumSq !== undefined) {
+    const meanHeadY = creature.headYSum / totalSteps;
+    const variance = (creature.headYSumSq / totalSteps) - (meanHeadY * meanHeadY);
+    const stdDev = Math.sqrt(Math.max(0, variance));
+    headStabilityBonus = Math.max(0, 20 - stdDev) * 2;
+  }
+
+  const uprightBonus = creature.minHeadY !== undefined
+    ? Math.max(0, groundY - creature.minHeadY) / 10
+    : 0;
+
+  const total = distance + targetBonus + deathPenalty + airbornePenalty + headStabilityBonus + uprightBonus;
+  return {
+    total,
+    distance,
+    targetBonus,
+    efficiency: airbornePenalty,
+    stability: headStabilityBonus,
+  };
+}
+
 type Phase = 'running' | 'evaluating' | 'evolving' | 'replay' | 'winner';
 
 function getCreatureColor(index: number): string {
   return `hsl(${(index * 360) / POPULATION_SIZE}, 78%, 58%)`;
 }
 
-export default function AdvancedLearningShowcase() {
+export default function PunishmentDirectedLearningShowcase() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameRef = useRef<number | undefined>(undefined);
   const lastTimeRef = useRef<number>(0);
@@ -73,7 +112,7 @@ export default function AdvancedLearningShowcase() {
     const elapsedMs = performance.now() - phaseEnteredAtRef.current;
     const elapsedS = (elapsedMs / 1000).toFixed(2);
     console.log(
-      `[Advanced Learning] Switching phase: ${fromPhase} -> ${toPhase}, took ${elapsedS}s`
+      `[Punishment Learning] Switching phase: ${fromPhase} -> ${toPhase}, took ${elapsedS}s`
     );
     phaseEnteredAtRef.current = performance.now();
   }
@@ -191,7 +230,7 @@ export default function AdvancedLearningShowcase() {
           const batchUsed = isBatchWasmReady() && stepPhysicsBatch(
             list, ground, wallList, targetZone,
             remainingSteps, totalSimTimeRef.current, FIXED_TIMESTEP,
-            { forceX: 0, forceY: GRAVITY, airResistance: 0.02, constraintIterations: 3, muscleStiffness: MUSCLE_STIFFNESS, leftFootIdx: 0, rightFootIdx: 0 }
+            { forceX: 0, forceY: GRAVITY, airResistance: 0.02, constraintIterations: 3, muscleStiffness: MUSCLE_STIFFNESS, leftFootIdx: LEFT_FOOT_IDX, rightFootIdx: RIGHT_FOOT_IDX }
           );
 
           if (!batchUsed) {
@@ -210,6 +249,17 @@ export default function AdvancedLearningShowcase() {
                 c.currentPos = calculateCenterOfMass(c.particles);
                 c.maxDistance = Math.max(c.maxDistance, c.currentPos.x);
                 if (checkCreatureTargetZone(c, targetZone)) c.reachedTarget = true;
+                // TS fallback: track walking metrics
+                const lFoot = c.particles[LEFT_FOOT_IDX];
+                const rFoot = c.particles[RIGHT_FOOT_IDX];
+                c.totalSteps = (c.totalSteps ?? 0) + 1;
+                c.headYSum = (c.headYSum ?? 0) + (head ? head.pos.y : 0);
+                c.headYSumSq = (c.headYSumSq ?? 0) + (head ? head.pos.y * head.pos.y : 0);
+                if (lFoot && rFoot &&
+                  lFoot.pos.y < groundY - lFoot.radius &&
+                  rFoot.pos.y < groundY - rFoot.radius) {
+                  c.airborneSteps = (c.airborneSteps ?? 0) + 1;
+                }
               }
             }
           }
@@ -223,7 +273,7 @@ export default function AdvancedLearningShowcase() {
           const creatures = creaturesRef.current;
           for (let i = 0; i < creatures.length; i++) {
             const c = creatures[i];
-            c.fitness = calculateFitnessAdvanced(c, targetZone, c.startPos.x, groundY);
+            c.fitness = calculateFitnessPunishment(c, targetZone, c.startPos.x, groundY);
           }
           setCreatures([...creaturesRef.current]);
           const bestFitness = Math.max(
@@ -468,7 +518,7 @@ export default function AdvancedLearningShowcase() {
         if (totalSimTimeRef.current - lastStateUpdateRef.current >= 0.1) {
           const list = creaturesRef.current;
           for (let i = 0; i < list.length; i++) {
-            list[i].fitness = calculateFitnessAdvanced(
+            list[i].fitness = calculateFitnessPunishment(
               list[i],
               targetZone,
               list[i].startPos.x,
@@ -494,7 +544,7 @@ export default function AdvancedLearningShowcase() {
           const batchUsed = isBatchWasmReady() && stepPhysicsBatch(
             list, ground, wallList, targetZone,
             stepsToRun, totalSimTimeRef.current, FIXED_TIMESTEP,
-            { forceX: 0, forceY: GRAVITY, airResistance: 0.02, constraintIterations: 3, muscleStiffness: MUSCLE_STIFFNESS, leftFootIdx: 0, rightFootIdx: 0 }
+            { forceX: 0, forceY: GRAVITY, airResistance: 0.02, constraintIterations: 3, muscleStiffness: MUSCLE_STIFFNESS, leftFootIdx: LEFT_FOOT_IDX, rightFootIdx: RIGHT_FOOT_IDX }
           );
 
           if (!batchUsed) {
@@ -516,6 +566,17 @@ export default function AdvancedLearningShowcase() {
                 c.currentPos = calculateCenterOfMass(c.particles);
                 c.maxDistance = Math.max(c.maxDistance, c.currentPos.x);
                 if (checkCreatureTargetZone(c, targetZone)) c.reachedTarget = true;
+                // TS fallback: track walking metrics
+                const lFoot2 = c.particles[LEFT_FOOT_IDX];
+                const rFoot2 = c.particles[RIGHT_FOOT_IDX];
+                c.totalSteps = (c.totalSteps ?? 0) + 1;
+                c.headYSum = (c.headYSum ?? 0) + (head ? head.pos.y : 0);
+                c.headYSumSq = (c.headYSumSq ?? 0) + (head ? head.pos.y * head.pos.y : 0);
+                if (lFoot2 && rFoot2 &&
+                  lFoot2.pos.y < groundY - lFoot2.radius &&
+                  rFoot2.pos.y < groundY - rFoot2.radius) {
+                  c.airborneSteps = (c.airborneSteps ?? 0) + 1;
+                }
               }
               stepped++;
               if (performance.now() - physicsStartTime > MAX_PHYSICS_TIME_MS) break;
@@ -607,7 +668,7 @@ export default function AdvancedLearningShowcase() {
         style={{ background: '#1a1a1a' }}
       />
       <div className="absolute top-4 left-4 z-10 space-y-4">
-        <Panel title="Advanced Learning">
+        <Panel title="Punishment-Directed Learning">
           <div className="space-y-3">
             <Button onClick={initializePopulation} variant="primary">
               Run again
@@ -674,7 +735,7 @@ export default function AdvancedLearningShowcase() {
               <div>Elitism: {ELITISM_COUNT}</div>
               <div>Mutation: {(MUTATION_RATE * 100).toFixed(0)}%</div>
               <div>Crossover: SBX (η={SBX_ETA})</div>
-              <div>Fitness: distance + upright (head height)</div>
+              <div>Fitness: distance + airborne penalty + head stability</div>
               <div>Head touch ground = dead</div>
             </div>
           </div>

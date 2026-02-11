@@ -67,7 +67,9 @@ interface PhysicsWasmExports {
     numParticles: number,
     numConstraints: number,
     metadataOffset: number,
-    groundY: number
+    groundY: number,
+    leftFootIdx: number,
+    rightFootIdx: number
   ) => void;
 }
 

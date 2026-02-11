@@ -12,13 +12,13 @@ import { Vector2D, Particle, Constraint, Muscle } from './physics';
 export interface MuscleGene {
   /** Links to Muscle.id in the topology */
   muscleId: string;
-  
+
   /** Contraction amplitude (0..1) */
   amplitude: number;
-  
+
   /** Oscillation frequency (Hz, typically 0.1..5.0) */
   frequency: number;
-  
+
   /** Phase offset (radians, 0..2π) */
   phase: number;
 }
@@ -30,16 +30,16 @@ export interface MuscleGene {
 export interface Genome {
   /** Unique identifier for the genome */
   id: string;
-  
+
   /** Array of genes, one per muscle */
   genes: MuscleGene[];
-  
+
   /** Generation number where this genome originated */
   generation: number;
-  
+
   /** Optional IDs of parent genomes (for tracking lineage) */
   parentIds?: string[];
-  
+
   /** Timestamp of creation */
   createdAt: number;
 }
@@ -51,16 +51,16 @@ export interface Genome {
 export interface FitnessScore {
   /** Overall fitness (sum of all components) */
   total: number;
-  
+
   /** Distance traveled component */
   distance: number;
-  
+
   /** Bonus for reaching target zone */
   targetBonus: number;
-  
+
   /** Energy efficiency (future: energy consumed per distance) */
   efficiency: number;
-  
+
   /** Stability bonus (future: how stable the movement was) */
   stability: number;
 }
@@ -72,40 +72,52 @@ export interface FitnessScore {
 export interface Creature {
   /** Unique identifier for the creature */
   id: string;
-  
+
   /** Genetic information (DNA) */
   genome: Genome;
-  
+
   /** Physical particles (mass points) */
   particles: Particle[];
 
   /** Map of particle id to particle for constraint lookup (reused each step) */
   particleMap: Map<string, Particle>;
-  
+
   /** Passive constraints (bones, rigid connections) */
   constraints: Constraint[];
-  
+
   /** Active muscles (oscillatory constraints) */
   muscles: Muscle[];
-  
+
   /** Current fitness score */
   fitness: FitnessScore;
-  
+
   /** Whether the creature is dead (collision, out of bounds, etc.) */
   isDead: boolean;
-  
+
   /** Starting position (center of mass) */
   startPos: Vector2D;
-  
+
   /** Current position (center of mass) */
   currentPos: Vector2D;
-  
+
   /** Maximum X coordinate reached */
   maxDistance: number;
-  
+
   /** Whether the creature reached the target zone */
   reachedTarget: boolean;
-  
+
   /** Smallest Y of head during run (highest head position); used for upright bonus */
   minHeadY?: number;
+
+  /** Number of timesteps where both feet were off the ground simultaneously */
+  airborneSteps?: number;
+
+  /** Total number of physics timesteps simulated (for computing ratios) */
+  totalSteps?: number;
+
+  /** Running sum of head Y position each step (for computing mean head height) */
+  headYSum?: number;
+
+  /** Running sum of head Y² each step (for computing head height variance) */
+  headYSumSq?: number;
 }

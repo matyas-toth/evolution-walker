@@ -842,11 +842,13 @@
   ;; ============================================================
   ;; Batch physics: step ALL creatures in one call.
   ;; Memory: creatures data back-to-back, then walls, then metadata.
-  ;; Metadata per creature (12 f64 = 96 bytes):
+  ;; Metadata per creature (16 f64 = 128 bytes):
   ;;   +0  isDead        +8  headIdx       +16 startX
   ;;   +24 currentX      +32 currentY      +40 maxDistance
   ;;   +48 minHeadY      +56 reachedTarget +64 targetX
   ;;   +72 targetY       +80 targetW       +88 targetH
+  ;;   +96 airborneSteps +104 totalSteps   +112 headYSum
+  ;;   +120 headYSumSq
   ;; ============================================================
 
   (func $step_all_creatures (export "step_all_creatures")
@@ -890,10 +892,10 @@
         local.get $numCreatures
         i32.ge_u
         br_if $break
-        ;; metaOff = metadataOffset + c * 96
+        ;; metaOff = metadataOffset + c * 128
         local.get $metadataOffset
         local.get $c
-        i32.const 96
+        i32.const 128
         i32.mul
         i32.add
         local.set $metaOff
@@ -981,6 +983,8 @@
     (param $numConstraints i32)
     (param $metadataOffset i32)
     (param $groundY f64)
+    (param $leftFootIdx i32)
+    (param $rightFootIdx i32)
     (local $c i32)
     (local $creatureStride i32)
     (local $particlesOff i32)
@@ -1004,6 +1008,10 @@
     (local $targetY f64)
     (local $targetW f64)
     (local $targetH f64)
+    (local $footOff i32)
+    (local $footY f64)
+    (local $footRadius f64)
+    (local $lFootAirborne i32)
     ;; creatureStride = numParticles * 72 + numConstraints * 80
     local.get $numParticles
     i32.const 72
@@ -1021,10 +1029,10 @@
         local.get $numCreatures
         i32.ge_u
         br_if $c_break
-        ;; metaOff = metadataOffset + c * 96
+        ;; metaOff = metadataOffset + c * 128
         local.get $metadataOffset
         local.get $c
-        i32.const 96
+        i32.const 128
         i32.mul
         i32.add
         local.set $metaOff
@@ -1282,6 +1290,115 @@
                 br $tz_loop
               )
             )
+          end
+
+          ;; ---- Walking metrics ----
+          ;; totalSteps++ at metadata+104
+          local.get $metaOff
+          i32.const 104
+          i32.add
+          local.get $metaOff
+          i32.const 104
+          i32.add
+          f64.load
+          f64.const 1
+          f64.add
+          f64.store
+          ;; headYSum += headY at metadata+112
+          local.get $metaOff
+          i32.const 112
+          i32.add
+          local.get $metaOff
+          i32.const 112
+          i32.add
+          f64.load
+          local.get $headY
+          f64.add
+          f64.store
+          ;; headYSumSq += headY * headY at metadata+120
+          local.get $metaOff
+          i32.const 120
+          i32.add
+          local.get $metaOff
+          i32.const 120
+          i32.add
+          f64.load
+          local.get $headY
+          local.get $headY
+          f64.mul
+          f64.add
+          f64.store
+          ;; Airborne check: both feet off ground?
+          ;; Left foot: footOff = particlesOff + leftFootIdx * 72
+          i32.const 0
+          local.set $lFootAirborne
+          local.get $particlesOff
+          local.get $leftFootIdx
+          i32.const 72
+          i32.mul
+          i32.add
+          local.set $footOff
+          ;; footY at footOff+8
+          local.get $footOff
+          i32.const 8
+          i32.add
+          f64.load
+          local.set $footY
+          ;; footRadius at footOff+40
+          local.get $footOff
+          i32.const 40
+          i32.add
+          f64.load
+          local.set $footRadius
+          ;; if footY < groundY - footRadius => left foot is airborne
+          local.get $footY
+          local.get $groundY
+          local.get $footRadius
+          f64.sub
+          f64.lt
+          if
+            i32.const 1
+            local.set $lFootAirborne
+          end
+          ;; Only check right foot if left is airborne
+          local.get $lFootAirborne
+          if
+            ;; Right foot: footOff = particlesOff + rightFootIdx * 72
+            local.get $particlesOff
+            local.get $rightFootIdx
+            i32.const 72
+            i32.mul
+            i32.add
+            local.set $footOff
+            local.get $footOff
+            i32.const 8
+            i32.add
+            f64.load
+            local.set $footY
+            local.get $footOff
+            i32.const 40
+            i32.add
+            f64.load
+            local.set $footRadius
+            ;; if footY < groundY - footRadius => both airborne
+            local.get $footY
+            local.get $groundY
+            local.get $footRadius
+            f64.sub
+            f64.lt
+            if
+              ;; airborneSteps++ at metadata+96
+              local.get $metaOff
+              i32.const 96
+              i32.add
+              local.get $metaOff
+              i32.const 96
+              i32.add
+              f64.load
+              f64.const 1
+              f64.add
+              f64.store
+            end
           end
         end
         local.get $c

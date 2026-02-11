@@ -11,7 +11,7 @@ import { getPhysicsWasmModule } from './wasmGlue';
 const PARTICLE_STRIDE = 72;   // 9 f64 per particle
 const CONSTRAINT_STRIDE = 80; // 10 f64 per constraint/muscle
 const WALL_STRIDE = 24;       // 3 f64 per wall
-const METADATA_STRIDE = 96;   // 12 f64 per creature metadata
+const METADATA_STRIDE = 128;   // 16 f64 per creature metadata
 
 export interface BatchPhysicsOptions {
     forceX: number;
@@ -19,6 +19,8 @@ export interface BatchPhysicsOptions {
     airResistance: number;
     constraintIterations: number;
     muscleStiffness: number;
+    leftFootIdx: number;
+    rightFootIdx: number;
 }
 
 interface BatchLayout {
@@ -151,6 +153,11 @@ function syncToWasm(
         view.setFloat64(metaOff + 72, targetZone.y, true);
         view.setFloat64(metaOff + 80, targetZone.width, true);
         view.setFloat64(metaOff + 88, targetZone.height, true);
+        // Walking metrics (initialized to 0 for fresh creatures)
+        view.setFloat64(metaOff + 96, creature.airborneSteps ?? 0, true);
+        view.setFloat64(metaOff + 104, creature.totalSteps ?? 0, true);
+        view.setFloat64(metaOff + 112, creature.headYSum ?? 0, true);
+        view.setFloat64(metaOff + 120, creature.headYSumSq ?? 0, true);
     }
 
     // Walls
@@ -188,6 +195,11 @@ function syncFromWasm(
         creature.maxDistance = view.getFloat64(metaOff + 40, true);
         creature.minHeadY = view.getFloat64(metaOff + 48, true);
         creature.reachedTarget = view.getFloat64(metaOff + 56, true) !== 0;
+        // Walking metrics
+        creature.airborneSteps = view.getFloat64(metaOff + 96, true);
+        creature.totalSteps = view.getFloat64(metaOff + 104, true);
+        creature.headYSum = view.getFloat64(metaOff + 112, true);
+        creature.headYSumSq = view.getFloat64(metaOff + 120, true);
 
         // Particles: pos, oldPos, velocity
         for (let i = 0; i < numParticles; i++) {
@@ -282,7 +294,9 @@ export function stepPhysicsBatch(
                 numParticles,
                 layout.numConstraintsTotal,
                 layout.metadataOffset,
-                ground.y
+                ground.y,
+                options.leftFootIdx,
+                options.rightFootIdx
             );
             time += dt;
         }
