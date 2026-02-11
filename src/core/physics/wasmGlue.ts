@@ -42,6 +42,33 @@ interface PhysicsWasmExports {
     wallsOffset: number,
     numWalls: number
   ) => void;
+  step_all_creatures: (
+    creaturesOffset: number,
+    numCreatures: number,
+    numParticles: number,
+    numConstraints: number,
+    numMuscles: number,
+    wallsOffset: number,
+    numWalls: number,
+    metadataOffset: number,
+    groundY: number,
+    groundFriction: number,
+    groundRestitution: number,
+    forceX: number,
+    forceY: number,
+    dt: number,
+    airResistance: number,
+    time: number,
+    constraintIterations: number
+  ) => void;
+  post_step_creatures: (
+    creaturesOffset: number,
+    numCreatures: number,
+    numParticles: number,
+    numConstraints: number,
+    metadataOffset: number,
+    groundY: number
+  ) => void;
 }
 
 let wasmModule: PhysicsWasmExports | null = null;
@@ -86,6 +113,24 @@ export async function loadPhysicsWasm(): Promise<boolean> {
  */
 export function isPhysicsWasmReady(): boolean {
   return wasmModule !== null;
+}
+
+/**
+ * Returns true if the WASM module has batch functions (step_all_creatures, post_step_creatures).
+ * These are separate from the core physics functions to maintain backward compatibility.
+ */
+export function isBatchWasmReady(): boolean {
+  return wasmModule !== null &&
+    typeof wasmModule.step_all_creatures === 'function' &&
+    typeof wasmModule.post_step_creatures === 'function';
+}
+
+/**
+ * Returns the raw WASM module exports for batch operations.
+ * Returns null if WASM is not loaded.
+ */
+export function getPhysicsWasmModule(): PhysicsWasmExports | null {
+  return wasmModule;
 }
 
 export interface StepPhysicsWasmOptions {

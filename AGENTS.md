@@ -1,0 +1,4 @@
+- ALWAYS write reusable code, ALWAYS reduce redundancy and create common methods
+- NEVER write line-by-line comments, only on top of components and top of functions with proper format
+- This is a Thesis project, code accordingly
+- ALWAYS use types in TypeScript

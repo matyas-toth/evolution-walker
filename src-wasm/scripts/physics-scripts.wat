@@ -838,4 +838,458 @@
       )
     )
   )
+
+  ;; ============================================================
+  ;; Batch physics: step ALL creatures in one call.
+  ;; Memory: creatures data back-to-back, then walls, then metadata.
+  ;; Metadata per creature (12 f64 = 96 bytes):
+  ;;   +0  isDead        +8  headIdx       +16 startX
+  ;;   +24 currentX      +32 currentY      +40 maxDistance
+  ;;   +48 minHeadY      +56 reachedTarget +64 targetX
+  ;;   +72 targetY       +80 targetW       +88 targetH
+  ;; ============================================================
+
+  (func $step_all_creatures (export "step_all_creatures")
+    (param $creaturesOffset i32)
+    (param $numCreatures i32)
+    (param $numParticles i32)
+    (param $numConstraints i32)
+    (param $numMuscles i32)
+    (param $wallsOffset i32)
+    (param $numWalls i32)
+    (param $metadataOffset i32)
+    (param $groundY f64)
+    (param $groundFriction f64)
+    (param $groundRestitution f64)
+    (param $forceX f64)
+    (param $forceY f64)
+    (param $dt f64)
+    (param $airResistance f64)
+    (param $time f64)
+    (param $constraintIterations i32)
+    (local $c i32)
+    (local $creatureStride i32)
+    (local $particlesOff i32)
+    (local $constraintsOff i32)
+    (local $musclesOff i32)
+    (local $metaOff i32)
+    ;; creatureStride = numParticles * 72 + numConstraints * 80
+    local.get $numParticles
+    i32.const 72
+    i32.mul
+    local.get $numConstraints
+    i32.const 80
+    i32.mul
+    i32.add
+    local.set $creatureStride
+    i32.const 0
+    local.set $c
+    (block $break
+      (loop $loop
+        local.get $c
+        local.get $numCreatures
+        i32.ge_u
+        br_if $break
+        ;; metaOff = metadataOffset + c * 96
+        local.get $metadataOffset
+        local.get $c
+        i32.const 96
+        i32.mul
+        i32.add
+        local.set $metaOff
+        ;; skip dead creatures (isDead != 0)
+        local.get $metaOff
+        f64.load
+        f64.const 0
+        f64.ne
+        if
+        else
+          ;; particlesOff = creaturesOffset + c * creatureStride
+          local.get $creaturesOffset
+          local.get $c
+          local.get $creatureStride
+          i32.mul
+          i32.add
+          local.set $particlesOff
+          ;; constraintsOff = particlesOff + numParticles * 72
+          local.get $particlesOff
+          local.get $numParticles
+          i32.const 72
+          i32.mul
+          i32.add
+          local.set $constraintsOff
+          ;; musclesOff = constraintsOff + (numConstraints - numMuscles) * 80
+          local.get $constraintsOff
+          local.get $numConstraints
+          local.get $numMuscles
+          i32.sub
+          i32.const 80
+          i32.mul
+          i32.add
+          local.set $musclesOff
+          ;; 1. update_muscles(musclesOff, numMuscles, time)
+          local.get $musclesOff
+          local.get $numMuscles
+          local.get $time
+          call $update_muscles
+          ;; 2. integrate_verlet(particlesOff, numParticles, forceX, forceY, dt, airResistance)
+          local.get $particlesOff
+          local.get $numParticles
+          local.get $forceX
+          local.get $forceY
+          local.get $dt
+          local.get $airResistance
+          call $integrate_verlet
+          ;; 3. satisfy_constraints(particlesOff, constraintsOff, numConstraints, iterations)
+          local.get $particlesOff
+          local.get $constraintsOff
+          local.get $numConstraints
+          local.get $constraintIterations
+          call $satisfy_constraints
+          ;; 4. ground_collision(particlesOff, numParticles, groundY, friction, restitution)
+          local.get $particlesOff
+          local.get $numParticles
+          local.get $groundY
+          local.get $groundFriction
+          local.get $groundRestitution
+          call $ground_collision
+          ;; 5. wall_collision(particlesOff, numParticles, wallsOffset, numWalls)
+          local.get $particlesOff
+          local.get $numParticles
+          local.get $wallsOffset
+          local.get $numWalls
+          call $wall_collision
+        end
+        local.get $c
+        i32.const 1
+        i32.add
+        local.set $c
+        br $loop
+      )
+    )
+  )
+
+  ;; ============================================================
+  ;; Post-step: head-death, center-of-mass, maxDistance, minHeadY,
+  ;; target-zone check for all creatures.
+  ;; ============================================================
+
+  (func $post_step_creatures (export "post_step_creatures")
+    (param $creaturesOffset i32)
+    (param $numCreatures i32)
+    (param $numParticles i32)
+    (param $numConstraints i32)
+    (param $metadataOffset i32)
+    (param $groundY f64)
+    (local $c i32)
+    (local $creatureStride i32)
+    (local $particlesOff i32)
+    (local $metaOff i32)
+    (local $headIdx i32)
+    (local $headOff i32)
+    (local $headY f64)
+    (local $headRadius f64)
+    (local $totalMass f64)
+    (local $weightedX f64)
+    (local $weightedY f64)
+    (local $pOff i32)
+    (local $mass f64)
+    (local $p i32)
+    (local $centerX f64)
+    (local $maxDist f64)
+    (local $minHeadY f64)
+    (local $posX f64)
+    (local $posY f64)
+    (local $targetX f64)
+    (local $targetY f64)
+    (local $targetW f64)
+    (local $targetH f64)
+    ;; creatureStride = numParticles * 72 + numConstraints * 80
+    local.get $numParticles
+    i32.const 72
+    i32.mul
+    local.get $numConstraints
+    i32.const 80
+    i32.mul
+    i32.add
+    local.set $creatureStride
+    i32.const 0
+    local.set $c
+    (block $c_break
+      (loop $c_loop
+        local.get $c
+        local.get $numCreatures
+        i32.ge_u
+        br_if $c_break
+        ;; metaOff = metadataOffset + c * 96
+        local.get $metadataOffset
+        local.get $c
+        i32.const 96
+        i32.mul
+        i32.add
+        local.set $metaOff
+        ;; skip dead
+        local.get $metaOff
+        f64.load
+        f64.const 0
+        f64.ne
+        if
+        else
+          ;; particlesOff = creaturesOffset + c * creatureStride
+          local.get $creaturesOffset
+          local.get $c
+          local.get $creatureStride
+          i32.mul
+          i32.add
+          local.set $particlesOff
+          ;; headIdx from metadata at +8
+          local.get $metaOff
+          i32.const 8
+          i32.add
+          f64.load
+          i32.trunc_sat_f64_u
+          local.set $headIdx
+          ;; headOff = particlesOff + headIdx * 72
+          local.get $particlesOff
+          local.get $headIdx
+          i32.const 72
+          i32.mul
+          i32.add
+          local.set $headOff
+          ;; headY = pos.y at headOff+8
+          local.get $headOff
+          i32.const 8
+          i32.add
+          f64.load
+          local.set $headY
+          ;; headRadius at headOff+40
+          local.get $headOff
+          i32.const 40
+          i32.add
+          f64.load
+          local.set $headRadius
+          ;; head-death: if headY >= groundY - headRadius
+          local.get $headY
+          local.get $groundY
+          local.get $headRadius
+          f64.sub
+          f64.ge
+          if
+            ;; mark dead
+            local.get $metaOff
+            f64.const 1
+            f64.store
+            ;; skip rest, advance counter
+            local.get $c
+            i32.const 1
+            i32.add
+            local.set $c
+            br $c_loop
+          end
+          ;; minHeadY = min(current, headY)
+          local.get $metaOff
+          i32.const 48
+          i32.add
+          f64.load
+          local.set $minHeadY
+          local.get $headY
+          local.get $minHeadY
+          f64.lt
+          if
+            local.get $metaOff
+            i32.const 48
+            i32.add
+            local.get $headY
+            f64.store
+          end
+          ;; Center of mass
+          f64.const 0
+          local.set $totalMass
+          f64.const 0
+          local.set $weightedX
+          f64.const 0
+          local.set $weightedY
+          i32.const 0
+          local.set $p
+          (block $p_break
+            (loop $p_loop
+              local.get $p
+              local.get $numParticles
+              i32.ge_u
+              br_if $p_break
+              local.get $particlesOff
+              local.get $p
+              i32.const 72
+              i32.mul
+              i32.add
+              local.set $pOff
+              ;; mass at pOff+32
+              local.get $pOff
+              i32.const 32
+              i32.add
+              f64.load
+              local.set $mass
+              local.get $totalMass
+              local.get $mass
+              f64.add
+              local.set $totalMass
+              local.get $weightedX
+              local.get $pOff
+              f64.load
+              local.get $mass
+              f64.mul
+              f64.add
+              local.set $weightedX
+              local.get $weightedY
+              local.get $pOff
+              i32.const 8
+              i32.add
+              f64.load
+              local.get $mass
+              f64.mul
+              f64.add
+              local.set $weightedY
+              local.get $p
+              i32.const 1
+              i32.add
+              local.set $p
+              br $p_loop
+            )
+          )
+          ;; centerX = weightedX / totalMass
+          local.get $weightedX
+          local.get $totalMass
+          f64.div
+          local.set $centerX
+          ;; write currentX at +24
+          local.get $metaOff
+          i32.const 24
+          i32.add
+          local.get $centerX
+          f64.store
+          ;; write currentY at +32
+          local.get $metaOff
+          i32.const 32
+          i32.add
+          local.get $weightedY
+          local.get $totalMass
+          f64.div
+          f64.store
+          ;; maxDistance = max(maxDistance, centerX) at +40
+          local.get $metaOff
+          i32.const 40
+          i32.add
+          f64.load
+          local.set $maxDist
+          local.get $centerX
+          local.get $maxDist
+          f64.gt
+          if
+            local.get $metaOff
+            i32.const 40
+            i32.add
+            local.get $centerX
+            f64.store
+          end
+          ;; target zone check (only if not already reached)
+          local.get $metaOff
+          i32.const 56
+          i32.add
+          f64.load
+          f64.const 0
+          f64.eq
+          if
+            local.get $metaOff
+            i32.const 64
+            i32.add
+            f64.load
+            local.set $targetX
+            local.get $metaOff
+            i32.const 72
+            i32.add
+            f64.load
+            local.set $targetY
+            local.get $metaOff
+            i32.const 80
+            i32.add
+            f64.load
+            local.set $targetW
+            local.get $metaOff
+            i32.const 88
+            i32.add
+            f64.load
+            local.set $targetH
+            i32.const 0
+            local.set $p
+            (block $tz_break
+              (loop $tz_loop
+                local.get $p
+                local.get $numParticles
+                i32.ge_u
+                br_if $tz_break
+                local.get $particlesOff
+                local.get $p
+                i32.const 72
+                i32.mul
+                i32.add
+                local.set $pOff
+                local.get $pOff
+                f64.load
+                local.set $posX
+                local.get $pOff
+                i32.const 8
+                i32.add
+                f64.load
+                local.set $posY
+                ;; posX >= targetX
+                local.get $posX
+                local.get $targetX
+                f64.ge
+                if
+                  ;; posX <= targetX + targetW
+                  local.get $posX
+                  local.get $targetX
+                  local.get $targetW
+                  f64.add
+                  f64.le
+                  if
+                    ;; posY >= targetY
+                    local.get $posY
+                    local.get $targetY
+                    f64.ge
+                    if
+                      ;; posY <= targetY + targetH
+                      local.get $posY
+                      local.get $targetY
+                      local.get $targetH
+                      f64.add
+                      f64.le
+                      if
+                        local.get $metaOff
+                        i32.const 56
+                        i32.add
+                        f64.const 1
+                        f64.store
+                        br $tz_break
+                      end
+                    end
+                  end
+                end
+                local.get $p
+                i32.const 1
+                i32.add
+                local.set $p
+                br $tz_loop
+              )
+            )
+          end
+        end
+        local.get $c
+        i32.const 1
+        i32.add
+        local.set $c
+        br $c_loop
+      )
+    )
+  )
 )

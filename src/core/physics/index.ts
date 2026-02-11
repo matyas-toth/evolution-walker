@@ -29,4 +29,7 @@ export {
 export { stepPhysics, type StepPhysicsOptions } from './stepPhysics';
 
 // WASM glue (optional preload)
-export { loadPhysicsWasm, isPhysicsWasmReady } from './wasmGlue';
+export { loadPhysicsWasm, isPhysicsWasmReady, isBatchWasmReady } from './wasmGlue';
+
+// Batch WASM physics (all creatures in one call)
+export { stepPhysicsBatch, type BatchPhysicsOptions } from './wasmBatchGlue';

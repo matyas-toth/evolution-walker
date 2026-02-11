@@ -21,6 +21,8 @@ import {
 import {
   stepPhysics,
   loadPhysicsWasm,
+  isBatchWasmReady,
+  stepPhysicsBatch,
   checkCreatureTargetZone,
   checkHeadGroundAndKill,
 } from '@/core/physics';
@@ -167,68 +169,57 @@ export default function AdvancedLearningShowcase() {
     canvas.height = window.innerHeight;
 
     const update = (currentTime: number) => {
-      const deltaTime = currentTime - lastTimeRef.current;
+      let deltaTime = currentTime - lastTimeRef.current;
       lastTimeRef.current = currentTime;
-      if (deltaTime > 1000) return;
+      // Clamp large deltas (tab backgrounded, heavy batch, etc.) instead of returning
+      // to prevent killing the rAF loop
+      if (deltaTime > 1000) deltaTime = 16;
 
       const currentPhase = phaseRef.current;
 
       if (currentPhase === 'evaluating') {
-        // Ensure all physics steps are complete before calculating fitness
-        // Process any remaining physics steps until accumulator is empty and simulation time is complete
-        const MAX_PHYSICS_TIME_MS = 8;
-        const physicsStartTime = performance.now();
-        
-        while (
-          timeAccumulatorRef.current >= FIXED_TIMESTEP &&
-          totalSimTimeRef.current < GENERATION_DURATION
-        ) {
-          const list = creaturesRef.current;
-          for (let i = 0; i < list.length; i++) {
-            const workingCreature: Creature = { ...list[i] };
-            if (workingCreature.isDead) {
-              list[i] = workingCreature;
-              continue;
-            }
-            workingCreature.muscles.forEach((m) => {
-              m.stiffness = MUSCLE_STIFFNESS;
-            });
-            stepPhysics(
-              workingCreature,
-              { y: groundY, friction: GROUND_FRICTION, restitution: 0.3 },
-              [{ x: 0, normal: { x: 1, y: 0 } }],
-              FIXED_TIMESTEP,
-              { forceY: GRAVITY, airResistance: 0.02, time: totalSimTimeRef.current, constraintIterations: 3 }
-            );
-            checkHeadGroundAndKill(workingCreature, groundY);
-            const head = workingCreature.particles.find((p) => p.id === 'head');
-            if (head) {
-              workingCreature.minHeadY = Math.min(
-                workingCreature.minHeadY ?? head.pos.y,
-                head.pos.y
-              );
-            }
-            workingCreature.currentPos = calculateCenterOfMass(workingCreature.particles);
-            workingCreature.maxDistance = Math.max(
-              workingCreature.maxDistance,
-              workingCreature.currentPos.x
-            );
-            if (checkCreatureTargetZone(workingCreature, targetZone)) {
-              workingCreature.reachedTarget = true;
-            }
-            list[i] = workingCreature;
-          }
-          totalSimTimeRef.current += FIXED_TIMESTEP;
-          timeAccumulatorRef.current -= FIXED_TIMESTEP;
+        // Drain all remaining physics steps in one batch
+        const simTimeRemaining = GENERATION_DURATION - totalSimTimeRef.current + FIXED_TIMESTEP * 0.5;
+        const remainingSteps = Math.max(0, Math.floor(
+          Math.min(timeAccumulatorRef.current, simTimeRemaining) / FIXED_TIMESTEP
+        ));
 
-          // Yield to browser if we've used too much time
-          if (performance.now() - physicsStartTime > MAX_PHYSICS_TIME_MS) {
-            break; // Continue processing next frame
+        if (remainingSteps > 0) {
+          const list = creaturesRef.current;
+          const ground = { y: groundY, friction: GROUND_FRICTION, restitution: 0.3 };
+          const wallList = [{ x: 0, normal: { x: 1, y: 0 } }];
+          const batchUsed = isBatchWasmReady() && stepPhysicsBatch(
+            list, ground, wallList, targetZone,
+            remainingSteps, totalSimTimeRef.current, FIXED_TIMESTEP,
+            { forceX: 0, forceY: GRAVITY, airResistance: 0.02, constraintIterations: 3, muscleStiffness: MUSCLE_STIFFNESS }
+          );
+
+          if (!batchUsed) {
+            // TS fallback: per-creature loop
+            for (let step = 0; step < remainingSteps; step++) {
+              for (let i = 0; i < list.length; i++) {
+                const c = list[i];
+                if (c.isDead) continue;
+                c.muscles.forEach((m) => { m.stiffness = MUSCLE_STIFFNESS; });
+                stepPhysics(c, ground, wallList, FIXED_TIMESTEP,
+                  { forceY: GRAVITY, airResistance: 0.02, time: totalSimTimeRef.current + step * FIXED_TIMESTEP, constraintIterations: 3 }
+                );
+                checkHeadGroundAndKill(c, groundY);
+                const head = c.particles.find((p) => p.id === 'head');
+                if (head) c.minHeadY = Math.min(c.minHeadY ?? head.pos.y, head.pos.y);
+                c.currentPos = calculateCenterOfMass(c.particles);
+                c.maxDistance = Math.max(c.maxDistance, c.currentPos.x);
+                if (checkCreatureTargetZone(c, targetZone)) c.reachedTarget = true;
+              }
+            }
           }
+
+          totalSimTimeRef.current += remainingSteps * FIXED_TIMESTEP;
+          timeAccumulatorRef.current -= remainingSteps * FIXED_TIMESTEP;
         }
 
-        // Only calculate fitness if physics is complete (simulation time reached duration)
-        if (totalSimTimeRef.current >= GENERATION_DURATION) {
+        // Only calculate fitness if physics is complete (half-step tolerance for float accumulation)
+        if (totalSimTimeRef.current >= GENERATION_DURATION - FIXED_TIMESTEP * 0.5) {
           const creatures = creaturesRef.current;
           for (let i = 0; i < creatures.length; i++) {
             const c = creatures[i];
@@ -491,61 +482,63 @@ export default function AdvancedLearningShowcase() {
           lastStateUpdateRef.current = totalSimTimeRef.current;
         }
 
-        // Time-budgeted physics processing: process all accumulated time, but yield to browser periodically
-        const MAX_PHYSICS_TIME_MS = 8; // ~8ms budget per frame (leaves ~8ms for rendering at 60 FPS)
-        const physicsStartTime = performance.now();
-        
-        while (timeAccumulatorRef.current >= FIXED_TIMESTEP) {
+        // Time-budgeted physics: batch as many steps as possible
+        const stepsAvailable = Math.floor(timeAccumulatorRef.current / FIXED_TIMESTEP);
+        const stepsUntilGenEnd = Math.floor((GENERATION_DURATION - totalSimTimeRef.current) / FIXED_TIMESTEP);
+        const stepsToRun = Math.min(stepsAvailable, Math.max(0, stepsUntilGenEnd));
+
+        if (stepsToRun > 0) {
           const list = creaturesRef.current;
-          for (let i = 0; i < list.length; i++) {
-            const workingCreature: Creature = { ...list[i] };
-            if (workingCreature.isDead) {
-              list[i] = workingCreature;
-              continue;
+          const ground = { y: groundY, friction: GROUND_FRICTION, restitution: 0.3 };
+          const wallList = [{ x: 0, normal: { x: 1, y: 0 } }];
+          const batchUsed = isBatchWasmReady() && stepPhysicsBatch(
+            list, ground, wallList, targetZone,
+            stepsToRun, totalSimTimeRef.current, FIXED_TIMESTEP,
+            { forceX: 0, forceY: GRAVITY, airResistance: 0.02, constraintIterations: 3, muscleStiffness: MUSCLE_STIFFNESS }
+          );
+
+          if (!batchUsed) {
+            // TS fallback: per-creature, time-budgeted loop
+            const MAX_PHYSICS_TIME_MS = 8;
+            const physicsStartTime = performance.now();
+            let stepped = 0;
+            while (stepped < stepsToRun) {
+              for (let i = 0; i < list.length; i++) {
+                const c = list[i];
+                if (c.isDead) continue;
+                c.muscles.forEach((m) => { m.stiffness = MUSCLE_STIFFNESS; });
+                stepPhysics(c, ground, wallList, FIXED_TIMESTEP,
+                  { forceY: GRAVITY, airResistance: 0.02, time: totalSimTimeRef.current + stepped * FIXED_TIMESTEP, constraintIterations: 3 }
+                );
+                checkHeadGroundAndKill(c, groundY);
+                const head = c.particles.find((p) => p.id === 'head');
+                if (head) c.minHeadY = Math.min(c.minHeadY ?? head.pos.y, head.pos.y);
+                c.currentPos = calculateCenterOfMass(c.particles);
+                c.maxDistance = Math.max(c.maxDistance, c.currentPos.x);
+                if (checkCreatureTargetZone(c, targetZone)) c.reachedTarget = true;
+              }
+              stepped++;
+              if (performance.now() - physicsStartTime > MAX_PHYSICS_TIME_MS) break;
             }
-            workingCreature.muscles.forEach((m) => {
-              m.stiffness = MUSCLE_STIFFNESS;
-            });
-            stepPhysics(
-              workingCreature,
-              { y: groundY, friction: GROUND_FRICTION, restitution: 0.3 },
-              [{ x: 0, normal: { x: 1, y: 0 } }],
-              FIXED_TIMESTEP,
-              { forceY: GRAVITY, airResistance: 0.02, time: totalSimTimeRef.current, constraintIterations: 3 }
-            );
-            checkHeadGroundAndKill(workingCreature, groundY);
-            const head = workingCreature.particles.find((p) => p.id === 'head');
-            if (head) {
-              workingCreature.minHeadY = Math.min(
-                workingCreature.minHeadY ?? head.pos.y,
-                head.pos.y
-              );
-            }
-            workingCreature.currentPos = calculateCenterOfMass(workingCreature.particles);
-            workingCreature.maxDistance = Math.max(
-              workingCreature.maxDistance,
-              workingCreature.currentPos.x
-            );
-            if (checkCreatureTargetZone(workingCreature, targetZone)) {
-              workingCreature.reachedTarget = true;
-            }
-            list[i] = workingCreature;
+            totalSimTimeRef.current += stepped * FIXED_TIMESTEP;
+            timeAccumulatorRef.current -= stepped * FIXED_TIMESTEP;
+          } else {
+            totalSimTimeRef.current += stepsToRun * FIXED_TIMESTEP;
+            timeAccumulatorRef.current -= stepsToRun * FIXED_TIMESTEP;
           }
-          totalSimTimeRef.current += FIXED_TIMESTEP;
-          timeAccumulatorRef.current -= FIXED_TIMESTEP;
 
           if (generationTimeRef.current >= GENERATION_DURATION) {
             logPhaseSwitch('evaluating');
             phaseRef.current = 'evaluating';
             setPhase('evaluating');
-            break;
           }
+        }
 
-          // Yield to browser if we've used too much time (prevents UI blocking)
-          // Accumulator persists, so we'll continue processing next frame
-          if (performance.now() - physicsStartTime > MAX_PHYSICS_TIME_MS) {
-            break;
-          }
+        // Check generation end even when stepsToRun was 0 (all steps already completed)
+        if (generationTimeRef.current >= GENERATION_DURATION && phaseRef.current === 'running') {
+          logPhaseSwitch('evaluating');
+          phaseRef.current = 'evaluating';
+          setPhase('evaluating');
         }
       }
 
