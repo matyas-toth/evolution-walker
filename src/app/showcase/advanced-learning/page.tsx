@@ -39,6 +39,7 @@ const MUSCLE_STIFFNESS = 0.9;
 const GROUND_FRICTION = 0.7;
 const POPULATION_SIZE = 1000;
 const GENERATION_DURATION = 10;
+const TOTAL_GENERATION_STEPS = Math.round(GENERATION_DURATION / FIXED_TIMESTEP);
 const ELITISM_COUNT = 1;
 const PARENTS_TOP_PERCENT = 0.2;
 const MUTATION_RATE = 0.12;
@@ -57,6 +58,7 @@ export default function AdvancedLearningShowcase() {
   const animationFrameRef = useRef<number | undefined>(undefined);
   const lastTimeRef = useRef<number>(0);
   const timeAccumulatorRef = useRef<number>(0);
+  const totalStepsRef = useRef<number>(0);
   const totalSimTimeRef = useRef<number>(0);
   const generationTimeRef = useRef<number>(0);
   const lastStateUpdateRef = useRef<number>(0);
@@ -127,6 +129,7 @@ export default function AdvancedLearningShowcase() {
     generationRef.current = 0;
     setGeneration(0);
     timeAccumulatorRef.current = 0;
+    totalStepsRef.current = 0;
     totalSimTimeRef.current = 0;
     generationTimeRef.current = 0;
     lastStateUpdateRef.current = 0;
@@ -179,10 +182,7 @@ export default function AdvancedLearningShowcase() {
 
       if (currentPhase === 'evaluating') {
         // Drain all remaining physics steps in one batch
-        const simTimeRemaining = GENERATION_DURATION - totalSimTimeRef.current + FIXED_TIMESTEP * 0.5;
-        const remainingSteps = Math.max(0, Math.floor(
-          Math.min(timeAccumulatorRef.current, simTimeRemaining) / FIXED_TIMESTEP
-        ));
+        const remainingSteps = TOTAL_GENERATION_STEPS - totalStepsRef.current;
 
         if (remainingSteps > 0) {
           const list = creaturesRef.current;
@@ -190,7 +190,7 @@ export default function AdvancedLearningShowcase() {
           const wallList = [{ x: 0, normal: { x: 1, y: 0 } }];
           const batchUsed = isBatchWasmReady() && stepPhysicsBatch(
             list, ground, wallList, targetZone,
-            remainingSteps, totalSimTimeRef.current, FIXED_TIMESTEP,
+            remainingSteps, totalStepsRef.current, FIXED_TIMESTEP,
             { forceX: 0, forceY: GRAVITY, airResistance: 0.02, constraintIterations: 3, muscleStiffness: MUSCLE_STIFFNESS, leftFootIdx: 0, rightFootIdx: 0 }
           );
 
@@ -202,7 +202,7 @@ export default function AdvancedLearningShowcase() {
                 if (c.isDead) continue;
                 c.muscles.forEach((m) => { m.stiffness = MUSCLE_STIFFNESS; });
                 stepPhysics(c, ground, wallList, FIXED_TIMESTEP,
-                  { forceY: GRAVITY, airResistance: 0.02, time: totalSimTimeRef.current + step * FIXED_TIMESTEP, constraintIterations: 3 }
+                  { forceY: GRAVITY, airResistance: 0.02, time: (totalStepsRef.current + step) * FIXED_TIMESTEP, constraintIterations: 3 }
                 );
                 checkHeadGroundAndKill(c, groundY);
                 const head = c.particles.find((p) => p.id === 'head');
@@ -214,12 +214,12 @@ export default function AdvancedLearningShowcase() {
             }
           }
 
-          totalSimTimeRef.current += remainingSteps * FIXED_TIMESTEP;
-          timeAccumulatorRef.current -= remainingSteps * FIXED_TIMESTEP;
+          totalStepsRef.current += remainingSteps;
+          totalSimTimeRef.current = totalStepsRef.current * FIXED_TIMESTEP;
         }
 
-        // Only calculate fitness if physics is complete (half-step tolerance for float accumulation)
-        if (totalSimTimeRef.current >= GENERATION_DURATION - FIXED_TIMESTEP * 0.5) {
+        // Only calculate fitness if physics is complete
+        if (totalStepsRef.current >= TOTAL_GENERATION_STEPS) {
           const creatures = creaturesRef.current;
           for (let i = 0; i < creatures.length; i++) {
             const c = creatures[i];
@@ -243,6 +243,7 @@ export default function AdvancedLearningShowcase() {
               winner.genome,
               spawnPos
             );
+            totalStepsRef.current = 0;
             totalSimTimeRef.current = 0;
             timeAccumulatorRef.current = 0;
             logPhaseSwitch('replay');
@@ -298,6 +299,7 @@ export default function AdvancedLearningShowcase() {
           generationRef.current = currentGen + 1;
           setGeneration(currentGen + 1);
           generationTimeRef.current = 0;
+          totalStepsRef.current = 0;
           totalSimTimeRef.current = 0;
           timeAccumulatorRef.current = 0;
           lastStateUpdateRef.current = 0;
@@ -342,6 +344,7 @@ export default function AdvancedLearningShowcase() {
             generationRef.current = config.currentGeneration + 1;
             setGeneration(config.currentGeneration + 1);
             generationTimeRef.current = 0;
+            totalStepsRef.current = 0;
             totalSimTimeRef.current = 0;
             timeAccumulatorRef.current = 0;
             lastStateUpdateRef.current = 0;
@@ -461,7 +464,7 @@ export default function AdvancedLearningShowcase() {
         const simDelta = (deltaTime / 1000) * speedMultiplierRef.current;
         timeAccumulatorRef.current += simDelta;
         generationTimeRef.current = Math.min(
-          generationTimeRef.current + simDelta,
+          totalStepsRef.current * FIXED_TIMESTEP,
           GENERATION_DURATION
         );
 
@@ -484,31 +487,33 @@ export default function AdvancedLearningShowcase() {
 
         // Time-budgeted physics: batch as many steps as possible
         const stepsAvailable = Math.floor(timeAccumulatorRef.current / FIXED_TIMESTEP);
-        const stepsUntilGenEnd = Math.floor((GENERATION_DURATION - totalSimTimeRef.current) / FIXED_TIMESTEP);
+        const stepsUntilGenEnd = TOTAL_GENERATION_STEPS - totalStepsRef.current;
         const stepsToRun = Math.min(stepsAvailable, Math.max(0, stepsUntilGenEnd));
 
         if (stepsToRun > 0) {
           const list = creaturesRef.current;
           const ground = { y: groundY, friction: GROUND_FRICTION, restitution: 0.3 };
           const wallList = [{ x: 0, normal: { x: 1, y: 0 } }];
+
+          let stepsRan = 0;
+          const physicsStartTime = performance.now();
+          const MAX_PHYSICS_TIME_MS = 16;
+
           const batchUsed = isBatchWasmReady() && stepPhysicsBatch(
             list, ground, wallList, targetZone,
-            stepsToRun, totalSimTimeRef.current, FIXED_TIMESTEP,
+            stepsToRun, totalStepsRef.current, FIXED_TIMESTEP,
             { forceX: 0, forceY: GRAVITY, airResistance: 0.02, constraintIterations: 3, muscleStiffness: MUSCLE_STIFFNESS, leftFootIdx: 0, rightFootIdx: 0 }
           );
 
           if (!batchUsed) {
             // TS fallback: per-creature, time-budgeted loop
-            const MAX_PHYSICS_TIME_MS = 8;
-            const physicsStartTime = performance.now();
-            let stepped = 0;
-            while (stepped < stepsToRun) {
+            for (let step = 0; step < stepsToRun; step++) {
               for (let i = 0; i < list.length; i++) {
                 const c = list[i];
                 if (c.isDead) continue;
                 c.muscles.forEach((m) => { m.stiffness = MUSCLE_STIFFNESS; });
                 stepPhysics(c, ground, wallList, FIXED_TIMESTEP,
-                  { forceY: GRAVITY, airResistance: 0.02, time: totalSimTimeRef.current + stepped * FIXED_TIMESTEP, constraintIterations: 3 }
+                  { forceY: GRAVITY, airResistance: 0.02, time: (totalStepsRef.current + step) * FIXED_TIMESTEP, constraintIterations: 3 }
                 );
                 checkHeadGroundAndKill(c, groundY);
                 const head = c.particles.find((p) => p.id === 'head');
@@ -517,25 +522,19 @@ export default function AdvancedLearningShowcase() {
                 c.maxDistance = Math.max(c.maxDistance, c.currentPos.x);
                 if (checkCreatureTargetZone(c, targetZone)) c.reachedTarget = true;
               }
-              stepped++;
+              stepsRan++;
               if (performance.now() - physicsStartTime > MAX_PHYSICS_TIME_MS) break;
             }
-            totalSimTimeRef.current += stepped * FIXED_TIMESTEP;
-            timeAccumulatorRef.current -= stepped * FIXED_TIMESTEP;
           } else {
-            totalSimTimeRef.current += stepsToRun * FIXED_TIMESTEP;
-            timeAccumulatorRef.current -= stepsToRun * FIXED_TIMESTEP;
+            stepsRan = stepsToRun;
           }
 
-          if (generationTimeRef.current >= GENERATION_DURATION) {
-            logPhaseSwitch('evaluating');
-            phaseRef.current = 'evaluating';
-            setPhase('evaluating');
-          }
+          totalStepsRef.current += stepsRan;
+          totalSimTimeRef.current = totalStepsRef.current * FIXED_TIMESTEP;
+          timeAccumulatorRef.current -= stepsRan * FIXED_TIMESTEP;
         }
 
-        // Check generation end even when stepsToRun was 0 (all steps already completed)
-        if (generationTimeRef.current >= GENERATION_DURATION && phaseRef.current === 'running') {
+        if (totalStepsRef.current >= TOTAL_GENERATION_STEPS) {
           logPhaseSwitch('evaluating');
           phaseRef.current = 'evaluating';
           setPhase('evaluating');

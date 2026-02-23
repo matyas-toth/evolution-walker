@@ -234,7 +234,7 @@ export function stepPhysicsBatch(
     walls: Wall[],
     targetZone: { x: number; y: number; width: number; height: number },
     numSteps: number,
-    startTime: number,
+    startStep: number,
     dt: number,
     options: BatchPhysicsOptions
 ): boolean {
@@ -271,8 +271,8 @@ export function stepPhysicsBatch(
         syncToWasm(view, creatures, walls, targetZone, layout, idToIndex, headIdx, options.muscleStiffness);
 
         // Run N timesteps: 2 WASM calls per step (instead of 5000+)
-        let time = startTime;
         for (let step = 0; step < numSteps; step++) {
+            const time = (startStep + step) * dt;
             mod.step_all_creatures(
                 layout.creaturesOffset,
                 numCreatures,
@@ -298,7 +298,6 @@ export function stepPhysicsBatch(
                 options.leftFootIdx,
                 options.rightFootIdx
             );
-            time += dt;
         }
 
         // Sync all creatures back from WASM
