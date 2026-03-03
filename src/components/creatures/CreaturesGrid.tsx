@@ -152,9 +152,10 @@ export function CreaturesGrid({ creatures: initial }: CreaturesGridProps) {
                 body: JSON.stringify({ name: newName.trim() }),
             })
             if (res.ok) {
+                const creature = await res.json()
                 setCreateOpen(false)
                 setNewName("")
-                router.refresh()
+                router.push(`/dashboard/creatures/${creature.id}/edit`)
             }
         } finally {
             setCreating(false)
