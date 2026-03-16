@@ -6,7 +6,7 @@
 "use client"
 
 import { useEffect } from "react"
-import { MousePointer2, Circle, Minus, Zap, Trash2, Undo2, Redo2 } from "lucide-react"
+import { MousePointer2, Circle, Minus, Zap, Trash2, Undo2, Redo2, Play, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Separator } from "@/components/ui/separator"
@@ -20,6 +20,8 @@ interface EditorToolbarProps {
     onRedo: () => void
     canUndo: boolean
     canRedo: boolean
+    isPreviewMode: boolean
+    onTogglePreview: () => void
 }
 
 const tools: { id: EditorTool; label: string; icon: React.ElementType; shortcut: string }[] = [
@@ -30,10 +32,18 @@ const tools: { id: EditorTool; label: string; icon: React.ElementType; shortcut:
     { id: "delete", label: "Delete", icon: Trash2, shortcut: "X" },
 ]
 
-export function EditorToolbar({ tool, onToolChange, onUndo, onRedo, canUndo, canRedo }: EditorToolbarProps) {
+export function EditorToolbar({ tool, onToolChange, onUndo, onRedo, canUndo, canRedo, isPreviewMode, onTogglePreview }: EditorToolbarProps) {
     useEffect(() => {
         function handleKey(e: KeyboardEvent) {
             if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+
+            if (e.code === "Space") {
+                e.preventDefault()
+                onTogglePreview()
+                return
+            }
+
+            if (isPreviewMode) return
 
             if ((e.ctrlKey || e.metaKey) && e.key === "z") {
                 e.preventDefault()
@@ -98,6 +108,30 @@ export function EditorToolbar({ tool, onToolChange, onUndo, onRedo, canUndo, can
                         </Button>
                     </TooltipTrigger>
                     <TooltipContent side="right">Redo <kbd className="ml-1 text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground">⌘⇧Z</kbd></TooltipContent>
+                </Tooltip>
+
+                <Separator className="my-1 w-6" />
+
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className={cn(
+                                "h-9 w-9 rounded-lg",
+                                isPreviewMode
+                                    ? "bg-amber-500/15 text-amber-500 hover:bg-amber-500/20 hover:text-amber-500"
+                                    : "text-amber-500/80 hover:text-amber-500 hover:bg-amber-500/10"
+                            )}
+                            onClick={onTogglePreview}
+                        >
+                            {isPreviewMode ? <Square className="h-4 w-4 fill-current" /> : <Play className="h-4 w-4 ml-0.5 fill-current" />}
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">
+                        {isPreviewMode ? "Stop Preview" : "Start Preview"}
+                        <kbd className="ml-1 text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground">Space</kbd>
+                    </TooltipContent>
                 </Tooltip>
             </TooltipProvider>
         </div>

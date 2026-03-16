@@ -8,8 +8,9 @@
 "use client"
 
 import { useRef, useEffect, useCallback, useState } from "react"
-import type { Topology } from "@/core/types"
+import type { Topology, Creature } from "@/core/types"
 import type { EditorTool, SelectedElement } from "@/hooks/useEditorState"
+import { loadPhysicsWasm, stepPhysicsWasm } from "@/core/physics/wasmGlue"
 
 interface Camera { x: number; y: number; zoom: number }
 
@@ -18,6 +19,7 @@ interface EditorCanvasProps {
     tool: EditorTool
     selected: SelectedElement | null
     pendingConnection: string | null
+    isPreviewMode: boolean
     onCanvasClick: (worldX: number, worldY: number) => void
     onParticleClick: (id: string) => void
     onConstraintClick: (id: string) => void
@@ -40,7 +42,7 @@ function distToSegment(px: number, py: number, x1: number, y1: number, x2: numbe
 }
 
 export function EditorCanvas({
-    topology, tool, selected, pendingConnection,
+    topology, tool, selected, pendingConnection, isPreviewMode,
     onCanvasClick, onParticleClick, onConstraintClick, onMuscleClick,
     onParticleDrag, onParticleDragEnd,
 }: EditorCanvasProps) {
@@ -52,6 +54,69 @@ export function EditorCanvas({
     const panRef = useRef<{ startX: number; startY: number; camX: number; camY: number } | null>(null)
     const [hovered, setHovered] = useState<SelectedElement | null>(null)
     const spaceRef = useRef(false)
+    const animationRef = useRef<number>(0)
+
+    // Physics state
+    const previewTopologyRef = useRef<Topology | null>(null)
+    const previewCreatureRef = useRef<Creature | null>(null)
+    const lastTimeRef = useRef<number>(0)
+    const timeAccumulatorRef = useRef<number>(0)
+    const totalStepsRef = useRef<number>(0)
+    const [isWasmReady, setIsWasmReady] = useState(false)
+
+    // Ensure wasm is loaded
+    useEffect(() => {
+        loadPhysicsWasm().then(() => setIsWasmReady(true))
+    }, [])
+
+    // Initialize or clear preview clone when toggling preview mode
+    useEffect(() => {
+        if (isPreviewMode) {
+            const clone = JSON.parse(JSON.stringify(topology)) as Topology
+            previewTopologyRef.current = clone
+            previewCreatureRef.current = {
+                id: "preview",
+                particles: clone.particles.map(p => ({
+                    ...p,
+                    pos: { ...p.initialPos },
+                    prevPos: { ...p.initialPos },
+                    oldPos: { ...p.initialPos },
+                    velocity: { x: 0, y: 0 },
+                    friction: 0.1,
+                })),
+                constraints: clone.constraints.map(c => ({
+                    ...c,
+                    targetLength: c.restLength
+                })),
+                muscles: clone.muscles.map(m => ({
+                    ...m,
+                    activation: 0,
+                    phase: 0,
+                    isMuscle: true,
+                    amplitude: 0.2,
+                    frequency: 2.0,
+                    currentLength: m.baseLength,
+                    restLength: m.baseLength,
+                })),
+                fitness: { total: 0, distance: 0, targetBonus: 0, efficiency: 0, stability: 0 },
+                isDead: false,
+                currentPos: { x: 0, y: 0 },
+                minHeadY: 0,
+                genome: [],
+                particleMap: new Map(),
+                startPos: { x: 0, y: 0 },
+                maxDistance: 0,
+                reachedTarget: false,
+            }
+            lastTimeRef.current = performance.now()
+            timeAccumulatorRef.current = 0
+            totalStepsRef.current = 0
+            // Reset camera slightly if needed? For now just keep current camera
+        } else {
+            previewTopologyRef.current = null
+            previewCreatureRef.current = null
+        }
+    }, [isPreviewMode, topology])
 
     const screenToWorld = useCallback((sx: number, sy: number) => {
         const cam = cameraRef.current
@@ -75,16 +140,18 @@ export function EditorCanvas({
         const pHitR = PARTICLE_HIT_RADIUS / zoom
         const lHitD = LINE_HIT_DISTANCE / zoom
 
-        for (const p of topology.particles) {
+        const currentTopology = isPreviewMode && previewTopologyRef.current ? previewTopologyRef.current : topology
+
+        for (const p of currentTopology.particles) {
             const dx = p.initialPos.x - wx, dy = p.initialPos.y - wy
             if (Math.sqrt(dx * dx + dy * dy) < pHitR) {
                 return { type: "particle", id: p.id }
             }
         }
 
-        const pMap = new Map(topology.particles.map((p) => [p.id, p]))
+        const pMap = new Map(currentTopology.particles.map((p) => [p.id, p]))
 
-        for (const m of topology.muscles) {
+        for (const m of currentTopology.muscles) {
             const p1 = pMap.get(m.p1Id), p2 = pMap.get(m.p2Id)
             if (!p1 || !p2) continue
             if (distToSegment(wx, wy, p1.initialPos.x, p1.initialPos.y, p2.initialPos.x, p2.initialPos.y) < lHitD) {
@@ -92,7 +159,7 @@ export function EditorCanvas({
             }
         }
 
-        for (const c of topology.constraints) {
+        for (const c of currentTopology.constraints) {
             const p1 = pMap.get(c.p1Id), p2 = pMap.get(c.p2Id)
             if (!p1 || !p2) continue
             if (distToSegment(wx, wy, p1.initialPos.x, p1.initialPos.y, p2.initialPos.x, p2.initialPos.y) < lHitD) {
@@ -101,13 +168,9 @@ export function EditorCanvas({
         }
 
         return null
-    }, [topology, screenToWorld])
+    }, [topology, screenToWorld, isPreviewMode])
 
-    const draw = useCallback(() => {
-        const canvas = canvasRef.current
-        if (!canvas) return
-        const ctx = canvas.getContext("2d")
-        if (!ctx) return
+    const drawScene = useCallback((ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, currentTopology: Topology) => {
         const dpr = window.devicePixelRatio || 1
         const w = canvas.offsetWidth, h = canvas.offsetHeight
         canvas.width = w * dpr
@@ -137,10 +200,10 @@ export function EditorCanvas({
         ctx.beginPath(); ctx.moveTo(origin.x, 0); ctx.lineTo(origin.x, h); ctx.stroke()
         ctx.setLineDash([])
 
-        const pMap = new Map(topology.particles.map((p) => [p.id, p]))
+        const pMap = new Map(currentTopology.particles.map((p) => [p.id, p]))
 
         ctx.lineCap = "round"
-        for (const c of topology.constraints) {
+        for (const c of currentTopology.constraints) {
             const p1 = pMap.get(c.p1Id), p2 = pMap.get(c.p2Id)
             if (!p1 || !p2) continue
             const s1 = worldToScreen(p1.initialPos.x, p1.initialPos.y)
@@ -152,7 +215,7 @@ export function EditorCanvas({
             ctx.beginPath(); ctx.moveTo(s1.x, s1.y); ctx.lineTo(s2.x, s2.y); ctx.stroke()
         }
 
-        for (const m of topology.muscles) {
+        for (const m of currentTopology.muscles) {
             const p1 = pMap.get(m.p1Id), p2 = pMap.get(m.p2Id)
             if (!p1 || !p2) continue
             const s1 = worldToScreen(p1.initialPos.x, p1.initialPos.y)
@@ -177,7 +240,7 @@ export function EditorCanvas({
             }
         }
 
-        for (const p of topology.particles) {
+        for (const p of currentTopology.particles) {
             const s = worldToScreen(p.initialPos.x, p.initialPos.y)
             const r = Math.max(4, p.radius * cam.zoom * 0.4)
             const isSel = selected?.type === "particle" && selected.id === p.id
@@ -207,14 +270,62 @@ export function EditorCanvas({
         ctx.font = "11px var(--font-geist-mono), monospace"
         ctx.textAlign = "left"
         ctx.fillText(`${Math.round(cam.zoom * 100)}%`, 8, h - 8)
-    }, [topology, selected, hovered, pendingConnection, tool, worldToScreen])
+    }, [selected, hovered, pendingConnection, tool, worldToScreen])
 
     useEffect(() => {
-        let raf: number
-        const loop = () => { draw(); raf = requestAnimationFrame(loop) }
-        raf = requestAnimationFrame(loop)
-        return () => cancelAnimationFrame(raf)
-    }, [draw])
+        const loop = (time: number) => {
+            animationRef.current = requestAnimationFrame(loop)
+            const canvas = canvasRef.current
+            const ctx = canvas?.getContext("2d")
+            if (!canvas || !ctx) return
+
+            // --- Physics Update ---
+            if (isPreviewMode && isWasmReady && previewCreatureRef.current && previewTopologyRef.current) {
+                let deltaTimeMs = time - lastTimeRef.current
+                lastTimeRef.current = time
+                if (deltaTimeMs > 1000) deltaTimeMs = 16 // Prevent spiral of death
+
+                timeAccumulatorRef.current += deltaTimeMs
+
+                // Fixed timestep physics (60hz)
+                const FIXED_TIMESTEP = 1 / 60
+                const stepTimeMs = FIXED_TIMESTEP * 1000
+
+                // Maximum of 10 steps per frame to prevent freezing on severe lag
+                let stepsToDo = 0
+                while (timeAccumulatorRef.current >= stepTimeMs && stepsToDo < 10) {
+                    timeAccumulatorRef.current -= stepTimeMs
+                    stepsToDo++
+                }
+
+                if (stepsToDo > 0) {
+                    const ground = { y: 200, friction: 0.7, restitution: 0.3 }
+                    const walls = [{ x: -400, normal: { x: 1, y: 0 } }, { x: 400, normal: { x: -1, y: 0 } }]
+
+                    for (let i = 0; i < stepsToDo; i++) {
+                        previewCreatureRef.current.muscles.forEach(m => { m.stiffness = 0.9 })
+                        stepPhysicsWasm(
+                            previewCreatureRef.current, ground, walls, FIXED_TIMESTEP,
+                            { forceY: 200, airResistance: 0.02, constraintIterations: 3, time: (totalStepsRef.current + i) * FIXED_TIMESTEP }
+                        )
+                    }
+                    totalStepsRef.current += stepsToDo
+
+                    // Sync changes back to the draw topology clone
+                    for (let i = 0; i < previewTopologyRef.current.particles.length; i++) {
+                        previewTopologyRef.current.particles[i].initialPos.x = previewCreatureRef.current.particles[i].pos.x
+                        previewTopologyRef.current.particles[i].initialPos.y = previewCreatureRef.current.particles[i].pos.y
+                    }
+                }
+            }
+
+            const activeTopology = isPreviewMode && previewTopologyRef.current ? previewTopologyRef.current : topology
+            drawScene(ctx, canvas, activeTopology)
+        }
+
+        animationRef.current = requestAnimationFrame(loop)
+        return () => cancelAnimationFrame(animationRef.current)
+    }, [drawScene, isPreviewMode, isWasmReady, topology])
 
     useEffect(() => {
         const container = containerRef.current
@@ -235,6 +346,7 @@ export function EditorCanvas({
     }, [])
 
     const handleMouseDown = useCallback((e: React.MouseEvent) => {
+        if (isPreviewMode) return
         const rect = canvasRef.current?.getBoundingClientRect()
         if (!rect) return
         const sx = e.clientX - rect.left, sy = e.clientY - rect.top
@@ -275,9 +387,10 @@ export function EditorCanvas({
                 else if (hit.type === "muscle") onMuscleClick(hit.id)
             }
         }
-    }, [tool, topology, hitTest, screenToWorld, onCanvasClick, onParticleClick, onConstraintClick, onMuscleClick])
+    }, [tool, topology, hitTest, screenToWorld, onCanvasClick, onParticleClick, onConstraintClick, onMuscleClick, isPreviewMode])
 
     const handleMouseMove = useCallback((e: React.MouseEvent) => {
+        if (isPreviewMode) return
         const rect = canvasRef.current?.getBoundingClientRect()
         if (!rect) return
         const sx = e.clientX - rect.left, sy = e.clientY - rect.top

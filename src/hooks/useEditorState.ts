@@ -18,6 +18,7 @@ interface EditorState {
     pendingConnection: string | null
     history: Topology[]
     historyIndex: number
+    isPreviewMode: boolean
 }
 
 type EditorAction =
@@ -35,6 +36,7 @@ type EditorAction =
     | { type: "SET_TOPOLOGY"; topology: Topology }
     | { type: "UNDO" }
     | { type: "REDO" }
+    | { type: "TOGGLE_PREVIEW" }
 
 function pushHistory(state: EditorState): EditorState {
     const newHistory = state.history.slice(0, state.historyIndex + 1)
@@ -44,6 +46,10 @@ function pushHistory(state: EditorState): EditorState {
 }
 
 function editorReducer(state: EditorState, action: EditorAction): EditorState {
+    if (state.isPreviewMode && action.type !== "TOGGLE_PREVIEW") {
+        return state; // Block all edits during preview mode
+    }
+
     switch (action.type) {
         case "SET_TOOL":
             return { ...state, tool: action.tool, pendingConnection: null, selected: null }
@@ -176,6 +182,19 @@ function editorReducer(state: EditorState, action: EditorAction): EditorState {
             }
         }
 
+        case "TOGGLE_PREVIEW": {
+            if (!state.isPreviewMode) {
+                // Entering preview mode
+                // Push current state to history if it's not already there exactly, so we can revert back
+                const s = pushHistory(state)
+                return { ...s, isPreviewMode: true, selected: null, pendingConnection: null, tool: "select" }
+            } else {
+                // Exiting preview mode - revert topology to the exact state before preview started
+                const revertTopo = JSON.parse(JSON.stringify(state.history[state.historyIndex]))
+                return { ...state, isPreviewMode: false, topology: revertTopo }
+            }
+        }
+
         default:
             return state
     }
@@ -190,6 +209,7 @@ export function useEditorState(initial: Topology) {
         pendingConnection: null,
         history: initialHistory,
         historyIndex: 0,
+        isPreviewMode: false,
     })
 
     const counterRef = useRef({ particle: initial.particles.length, constraint: initial.constraints.length, muscle: initial.muscles.length })

@@ -130,6 +130,8 @@ export function CreatureEditor({ creatureId, initialName, initialTopology }: Cre
                         onRedo={() => dispatch({ type: "REDO" })}
                         canUndo={state.historyIndex > 0}
                         canRedo={state.historyIndex < state.history.length - 1}
+                        isPreviewMode={state.isPreviewMode}
+                        onTogglePreview={() => dispatch({ type: "TOGGLE_PREVIEW" })}
                     />
                 </div>
 
@@ -138,6 +140,7 @@ export function CreatureEditor({ creatureId, initialName, initialTopology }: Cre
                     tool={state.tool}
                     selected={state.selected}
                     pendingConnection={state.pendingConnection}
+                    isPreviewMode={state.isPreviewMode}
                     onCanvasClick={handleCanvasClick}
                     onParticleClick={handleParticleClick}
                     onConstraintClick={handleConstraintClick}
