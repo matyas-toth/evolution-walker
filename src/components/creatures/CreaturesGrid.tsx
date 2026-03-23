@@ -8,7 +8,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
-import { Plus, Pencil, Trash2, Dna } from "lucide-react"
+import { Plus, Pencil, Trash2, Dna, Brain } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -251,6 +251,15 @@ export function CreaturesGrid({ creatures: initial }: CreaturesGridProps) {
                                     </p>
                                 </div>
                                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8 text-primary hover:text-primary hover:bg-primary/10"
+                                        onClick={() => router.push(`/dashboard/creatures/${creature.id}/train`)}
+                                        title="Train Creature"
+                                    >
+                                        <Brain className="h-4 w-4" />
+                                    </Button>
                                     <Button
                                         variant="ghost"
                                         size="icon"

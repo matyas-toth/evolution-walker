@@ -67,6 +67,20 @@ model Creature {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  genomes   Genome[]
 
   @@index([userId])
+}
+
+model Genome {
+  id            String   @id @default(cuid())
+  creature      Creature @relation(fields: [creatureId], references: [id], onDelete: Cascade)
+  creatureId    String
+  name          String?  // Optional custom name for the training run
+  weights       Json     // Custom weights/offsets
+  fitness       Float
+  reachedTarget Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  
+  @@index([creatureId])
 }
