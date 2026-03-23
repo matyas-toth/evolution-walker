@@ -24,27 +24,27 @@ export function FitnessChart({ data }: FitnessChartProps) {
                     <LineChart data={data} margin={{ top: 5, right: 20, left: -20, bottom: 0 }}>
                         <XAxis
                             dataKey="generation"
-                            stroke="hsl(var(--muted-foreground))"
+                            stroke="rgba(255, 255, 255, 0.3)"
                             fontSize={10}
                             tickLine={false}
                             axisLine={false}
                         />
                         <YAxis
-                            stroke="hsl(var(--muted-foreground))"
+                            stroke="rgba(255, 255, 255, 0.3)"
                             fontSize={10}
                             tickLine={false}
                             axisLine={false}
                             domain={['auto', 'auto']}
                         />
                         <Tooltip
-                            contentStyle={{ backgroundColor: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: "8px", fontSize: "12px" }}
-                            itemStyle={{ color: "hsl(var(--foreground))" }}
+                            contentStyle={{ backgroundColor: "#1a1a1a", borderColor: "#333", borderRadius: "8px", fontSize: "12px", color: "#fff" }}
+                            itemStyle={{ color: "#fff" }}
                         />
                         <Line
                             type="monotone"
                             dataKey="bestFitness"
                             name="Max Fitness"
-                            stroke="hsl(var(--primary))"
+                            stroke="#2ecc71"
                             strokeWidth={2}
                             dot={false}
                             isAnimationActive={false}
@@ -53,7 +53,7 @@ export function FitnessChart({ data }: FitnessChartProps) {
                             type="monotone"
                             dataKey="averageFitness"
                             name="Avg Fitness"
-                            stroke="hsl(var(--muted-foreground))"
+                            stroke="rgba(255, 255, 255, 0.5)"
                             strokeWidth={1.5}
                             dot={false}
                             isAnimationActive={false}

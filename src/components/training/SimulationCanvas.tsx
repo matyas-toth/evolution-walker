@@ -38,17 +38,19 @@ export function SimulationCanvas({ creatures, groundY, targetZone, showCount = 5
         const render = () => {
             ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-            // Sort to render best creatures last (on top)
-            const sorted = [...creatures].sort((a, b) => (a.fitness?.total ?? 0) - (b.fitness?.total ?? 0))
-            const colors = creatures.map((_, i) => getCreatureColor(i, creatures.length))
+            // Preserve original index to render consistent colors
+            const withIndex = creatures.map((c, i) => ({ creature: c, originalIndex: i }))
 
-            // Only draw top N
-            const toDraw = sorted.slice(-showCount)
+            // Sort by current X position in real time (the proxy for fitness during the generation)
+            withIndex.sort((a, b) => (a.creature.currentPos?.x ?? 0) - (b.creature.currentPos?.x ?? 0))
+
+            // Only draw top N (which are at the end of the array due to ascending sort)
+            const toDraw = withIndex.slice(-showCount)
 
             // Camera tracking
             let sumX = 0
-            for (const c of toDraw) {
-                sumX += (c.currentPos?.x || 100)
+            for (const item of toDraw) {
+                sumX += (item.creature.currentPos?.x || 100)
             }
             const avgX = toDraw.length > 0 ? sumX / toDraw.length : 100
 
@@ -82,7 +84,7 @@ export function SimulationCanvas({ creatures, groundY, targetZone, showCount = 5
             ctx.stroke()
 
             for (let i = 0; i < toDraw.length; i++) {
-                const c = toDraw[i]
+                const { creature: c, originalIndex } = toDraw[i]
 
                 // Draw Constraints
                 ctx.lineWidth = 2
@@ -113,7 +115,7 @@ export function SimulationCanvas({ creatures, groundY, targetZone, showCount = 5
                 }
 
                 // Draw Particles
-                ctx.fillStyle = colors[i % colors.length]
+                ctx.fillStyle = getCreatureColor(originalIndex, creatures.length)
                 for (const p of c.particles) {
                     ctx.beginPath()
                     ctx.arc(p.pos.x, p.pos.y, p.radius, 0, Math.PI * 2)
