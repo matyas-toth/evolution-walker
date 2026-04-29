@@ -60,12 +60,6 @@ export default async function LandingPage() {
           </Link>
         </div>
 
-        <Link
-          href="/showcase"
-          className="text-sm text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4 decoration-border hover:decoration-foreground"
-        >
-          View experiments →
-        </Link>
       </div>
 
       <div className="absolute bottom-6 text-xs text-muted-foreground/50">
