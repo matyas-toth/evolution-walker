@@ -62,9 +62,11 @@ function editorReducer(state: EditorState, action: EditorAction): EditorState {
 
         case "ADD_PARTICLE": {
             const s = pushHistory(state)
+            const isFirst = s.topology.particles.length === 0
+            const newParticle = { ...action.particle, isHead: isFirst }
             return {
                 ...s,
-                topology: { ...s.topology, particles: [...s.topology.particles, action.particle] },
+                topology: { ...s.topology, particles: [...s.topology.particles, newParticle] },
                 selected: { type: "particle", id: action.particle.id },
             }
         }
@@ -91,11 +93,15 @@ function editorReducer(state: EditorState, action: EditorAction): EditorState {
 
         case "UPDATE_PARTICLE": {
             const s = pushHistory(state)
+            let newParticles = s.topology.particles
+            if (action.updates.isHead === true) {
+                newParticles = newParticles.map(p => ({ ...p, isHead: false }))
+            }
             return {
                 ...s,
                 topology: {
                     ...s.topology,
-                    particles: s.topology.particles.map((p) =>
+                    particles: newParticles.map((p) =>
                         p.id === action.id ? { ...p, ...action.updates } : p
                     ),
                 },
@@ -144,9 +150,14 @@ function editorReducer(state: EditorState, action: EditorAction): EditorState {
             const s = pushHistory(state)
             const topo = { ...s.topology }
             if (action.elementType === "particle") {
+                const target = topo.particles.find((p) => p.id === action.id)
                 topo.particles = topo.particles.filter((p) => p.id !== action.id)
                 topo.constraints = topo.constraints.filter((c) => c.p1Id !== action.id && c.p2Id !== action.id)
                 topo.muscles = topo.muscles.filter((m) => m.p1Id !== action.id && m.p2Id !== action.id)
+                
+                if (target?.isHead && topo.particles.length > 0) {
+                    topo.particles[0] = { ...topo.particles[0], isHead: true }
+                }
             } else if (action.elementType === "constraint") {
                 topo.constraints = topo.constraints.filter((c) => c.id !== action.id)
             } else if (action.elementType === "muscle") {

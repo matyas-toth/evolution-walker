@@ -86,10 +86,19 @@ export function createCreatureFromTopology(
       mass: topoParticle.mass,
       radius: topoParticle.radius,
       isLocked: topoParticle.isLocked,
+      isHead: topoParticle.isHead,
       friction: 0.1,
       velocity: { x: 0, y: 0 },
     };
   });
+
+  // Ensure exactly one head (fallback for older topologies)
+  let headCount = particles.filter(p => p.isHead).length;
+  if (headCount === 0) {
+      const fallback = particles.find(p => p.id === 'head');
+      if (fallback) fallback.isHead = true;
+      else if (particles.length > 0) particles[0].isHead = true;
+  }
 
   const particleMap = new Map<string, Particle>();
   particles.forEach((p) => particleMap.set(p.id, p));

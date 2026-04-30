@@ -39,6 +39,9 @@ export interface Particle {
   
   /** Computed velocity (derived from pos - oldPos) */
   velocity: Vector2D;
+  
+  /** Whether this particle is designated as the creature's head */
+  isHead?: boolean;
 }
 
 /**

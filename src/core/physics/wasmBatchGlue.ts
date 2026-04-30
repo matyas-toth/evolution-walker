@@ -264,7 +264,7 @@ export function stepPhysicsBatch(
         // Build id-to-index map (shared across all creatures, same topology)
         const idToIndex = new Map<string, number>();
         first.particles.forEach((p, i) => idToIndex.set(p.id, i));
-        const headIdx = first.particles.findIndex(p => p.id === 'head');
+        const headIdx = first.particles.findIndex(p => p.isHead || p.id === 'head');
 
         // Sync all creatures to WASM (DataView created AFTER potential memory.grow)
         const view = new DataView(memory.buffer);

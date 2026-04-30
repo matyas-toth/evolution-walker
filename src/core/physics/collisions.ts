@@ -119,7 +119,7 @@ export function checkHeadGroundAndKill(
   groundY: number
 ): void {
   if (creature.isDead) return;
-  const head = creature.particles.find((p) => p.id === 'head');
+  const head = creature.particles.find((p) => p.isHead || p.id === 'head');
   if (!head) return;
   if (head.pos.y >= groundY - head.radius) {
     creature.isDead = true;

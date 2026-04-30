@@ -29,6 +29,7 @@ export const STICKMAN_TOPOLOGY: Topology = {
       mass: 1.0,
       radius: 8,
       isLocked: false,
+      isHead: true,
     },
     
     // Torso (center of body)

@@ -228,7 +228,7 @@ export function useEvolution(props: UseEvolutionProps) {
                                 { forceY: GRAVITY, airResistance: 0.02, time: (totalStepsRef.current + step) * FIXED_TIMESTEP, constraintIterations: 3 }
                             )
                             checkHeadGroundAndKill(c, currentConfig.groundY ?? 600)
-                            const head = c.particles.find((p) => p.id === "head")
+                            const head = c.particles.find((p) => p.isHead || p.id === "head")
                             if (head) c.minHeadY = Math.min(c.minHeadY ?? head.pos.y, head.pos.y)
                             c.currentPos = calculateCenterOfMass(c.particles)
                             c.maxDistance = Math.max(c.maxDistance, c.currentPos.x)
@@ -333,7 +333,7 @@ export function useEvolution(props: UseEvolutionProps) {
                                 { forceY: GRAVITY, airResistance: 0.02, time: (totalStepsRef.current + step) * FIXED_TIMESTEP, constraintIterations: 3 }
                             )
                             checkHeadGroundAndKill(c, groundY)
-                            const head = c.particles.find((p) => p.id === "head")
+                            const head = c.particles.find((p) => p.isHead || p.id === "head")
                             if (head) c.minHeadY = Math.min(c.minHeadY ?? head.pos.y, head.pos.y)
                             c.currentPos = calculateCenterOfMass(c.particles)
                             c.maxDistance = Math.max(c.maxDistance, c.currentPos.x)

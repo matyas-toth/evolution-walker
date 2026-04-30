@@ -90,7 +90,7 @@ export function calculateFitnessAdvanced(
 
   const headY =
     creature.minHeadY ??
-    creature.particles.find((p) => p.id === 'head')?.pos.y ??
+    creature.particles.find((p) => p.isHead || p.id === 'head')?.pos.y ??
     groundY;
   const uprightBonus =
     UPRIGHT_WEIGHT * Math.max(0, (groundY - headY) / groundY);

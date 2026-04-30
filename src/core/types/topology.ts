@@ -24,6 +24,9 @@ export interface TopologyParticle {
   
   /** Whether the particle is locked (fixed) */
   isLocked: boolean;
+  
+  /** Whether this particle is designated as the creature's head */
+  isHead?: boolean;
 }
 
 /**

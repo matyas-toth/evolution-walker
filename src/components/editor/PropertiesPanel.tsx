@@ -95,6 +95,18 @@ export function PropertiesPanel({
                             onCheckedChange={(isLocked) => onUpdateParticle(particle.id, { isLocked })}
                         />
                     </div>
+                    <div className="flex items-center justify-between pt-1">
+                        <Label className="text-xs text-muted-foreground">Is Head</Label>
+                        <Switch
+                            checked={particle.isHead || false}
+                            onCheckedChange={(isHead) => {
+                                if (isHead) {
+                                    onUpdateParticle(particle.id, { isHead: true });
+                                }
+                            }}
+                            disabled={particle.isHead}
+                        />
+                    </div>
                 </div>
             </div>
         )
