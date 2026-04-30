@@ -83,13 +83,7 @@ export function useEvolution(props: UseEvolutionProps) {
     const evolutionWorkerRef = useRef<EvolutionWorker | null>(null)
     const isWasmReadyRef = useRef(false)
 
-    // Derived target zone
-    const targetZone = {
-        x: targetDistance,
-        y: groundY - 100,
-        width: 100,
-        height: 80,
-    }
+
 
     // Initialize WASM and Worker
     useEffect(() => {
@@ -189,6 +183,13 @@ export function useEvolution(props: UseEvolutionProps) {
         const currentConfig = configRef.current
         if (phaseRef.current === "idle" || phaseRef.current === "paused" || !currentConfig.topology) return
 
+        const currentTargetZone = {
+            x: currentConfig.targetDistance,
+            y: (currentConfig.groundY ?? 600) - 100,
+            width: 100,
+            height: 80,
+        }
+
         let deltaTime = time - lastTimeRef.current
         lastTimeRef.current = time
         if (deltaTime > 1000) deltaTime = 16
@@ -212,7 +213,7 @@ export function useEvolution(props: UseEvolutionProps) {
                 const stepsToDo = currentConfig.backgroundMode ? Math.min(remainingSteps, 2500) : Math.min(remainingSteps, speedCap)
 
                 const batchUsed = isWasmReadyRef.current && isBatchWasmReady() && stepPhysicsBatch(
-                    list, ground, wallList, targetZone,
+                    list, ground, wallList, currentTargetZone,
                     stepsToDo, totalStepsRef.current, FIXED_TIMESTEP,
                     { forceX: 0, forceY: GRAVITY, airResistance: 0.02, constraintIterations: 3, muscleStiffness: MUSCLE_STIFFNESS, leftFootIdx: 0, rightFootIdx: 0 }
                 )
@@ -257,7 +258,7 @@ export function useEvolution(props: UseEvolutionProps) {
 
                 for (let i = 0; i < creatures.length; i++) {
                     const c = creatures[i]
-                    c.fitness = calculateFitnessAdvanced(c, targetZone, c.startPos.x, groundY)
+                    c.fitness = calculateFitnessAdvanced(c, currentTargetZone, c.startPos.x, groundY)
                     totalFit += c.fitness.total
                     if (c.fitness.total > bestFit) {
                         bestFit = c.fitness.total
@@ -317,7 +318,7 @@ export function useEvolution(props: UseEvolutionProps) {
                 stepsToDo = Math.min(stepsToDo, TOTAL_GENERATION_STEPS - totalStepsRef.current)
 
                 const batchUsed = isWasmReadyRef.current && isBatchWasmReady() && stepPhysicsBatch(
-                    list, ground, wallList, targetZone,
+                    list, ground, wallList, currentTargetZone,
                     stepsToDo, totalStepsRef.current, FIXED_TIMESTEP,
                     { forceX: 0, forceY: GRAVITY, airResistance: 0.02, constraintIterations: 3, muscleStiffness: MUSCLE_STIFFNESS, leftFootIdx: 0, rightFootIdx: 0 }
                 )
