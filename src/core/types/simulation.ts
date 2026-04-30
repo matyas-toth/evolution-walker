@@ -4,7 +4,7 @@
  */
 
 import { Vector2D } from './physics';
-import { Creature } from './genetics';
+import { Creature, Genome } from './genetics';
 
 /**
  * Simulation configuration
@@ -153,3 +153,28 @@ export interface SimulationUpdate {
     maxDistance: number;
   };
 }
+
+/**
+ * All Training Hub sidebar settings — serialized into TrainingSession.config.
+ * @module core/types/simulation
+ */
+export interface TrainingHubConfig {
+  populationSize: number
+  generationDuration: number
+  mutationRate: number
+  mutationStrength: number
+  elitismCount: number
+  parentsTopPercent: number
+  targetDistance: number
+  backgroundMode: boolean
+  simulationSpeed: number
+}
+
+/**
+ * Discriminated union controlling the COD-style replay overlay state machine.
+ * @module core/types/simulation
+ */
+export type ReplayPhase =
+  | { type: 'none' }
+  | { type: 'active'; genome: Genome; generation: number }
+  | { type: 'completed' }

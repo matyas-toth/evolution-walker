@@ -8,13 +8,14 @@ interface SimulationCanvasProps {
     groundY: number
     targetZone: { x: number; y: number; width: number; height: number }
     showCount?: number
+    dimmed?: boolean
 }
 
 function getCreatureColor(index: number, total: number): string {
     return `hsl(${(index * 360) / total}, 78%, 58%)`
 }
 
-export function SimulationCanvas({ creatures, groundY, targetZone, showCount = 5 }: SimulationCanvasProps) {
+export function SimulationCanvas({ creatures, groundY, targetZone, showCount = 5, dimmed = false }: SimulationCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const containerRef = useRef<HTMLDivElement>(null)
 
@@ -132,7 +133,7 @@ export function SimulationCanvas({ creatures, groundY, targetZone, showCount = 5
     }, [creatures, groundY, targetZone, showCount])
 
     return (
-        <div ref={containerRef} className="w-full h-full relative overflow-hidden bg-background">
+        <div ref={containerRef} className={`w-full h-full relative overflow-hidden bg-background transition-all duration-700 ${dimmed ? "opacity-30 blur-sm pointer-events-none" : ""}`}>
             <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
         </div>
     )

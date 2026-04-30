@@ -60,14 +60,15 @@ model VerificationToken {
 }
 
 model Creature {
-  id        String   @id @default(cuid())
-  name      String
-  topology  Json
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  genomes   Genome[]
+  id               String            @id @default(cuid())
+  name             String
+  topology         Json
+  userId           String
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  genomes          Genome[]
+  trainingSessions TrainingSession[]
 
   @@index([userId])
 }
@@ -82,5 +83,24 @@ model Genome {
   reachedTarget Boolean  @default(false)
   createdAt     DateTime @default(now())
   
+  @@index([creatureId])
+}
+
+/** Snapshot of a full training session: population + hub settings. */
+model TrainingSession {
+  id             String   @id @default(cuid())
+  creature       Creature @relation(fields: [creatureId], references: [id], onDelete: Cascade)
+  creatureId     String
+  name           String?
+  config         Json     // Serialized TrainingHubConfig
+  population     Json     // Serialized Genome[] (full generation)
+  bestGenome     Json     // Best genome of the session (cached for leaderboard)
+  bestFitness    Float
+  generation     Int      // Last completed generation number
+  reachedTarget  Boolean  @default(false)
+  targetDistance Float
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
   @@index([creatureId])
 }

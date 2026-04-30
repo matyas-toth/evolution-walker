@@ -26,6 +26,8 @@ export type {
   SimulationConfig,
   SimulationState,
   SimulationUpdate,
+  TrainingHubConfig,
+  ReplayPhase,
 } from './simulation';
 
 // Topology types

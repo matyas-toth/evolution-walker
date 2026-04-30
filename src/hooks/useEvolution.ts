@@ -18,6 +18,12 @@ export interface UseEvolutionProps {
     groundY?: number
     backgroundMode?: boolean
     simulationSpeed?: number
+    /** Seed the first generation with a saved population instead of random init */
+    initialPopulation?: Genome[]
+    /** Starting generation number when restoring a saved session */
+    initialGeneration?: number
+    /** Called once when any creature first reaches the target zone */
+    onTargetReached?: (winner: Creature) => void
 }
 
 export type EvolutionPhase = "idle" | "running" | "evaluating" | "evolving" | "paused"
@@ -60,6 +66,8 @@ export function useEvolution(props: UseEvolutionProps) {
     const [fitnessHistory, setFitnessHistory] = useState<FitnessDataPoint[]>([])
     const [bestCreatureEver, setBestCreatureEver] = useState<Creature | null>(null)
     const [progress, setProgress] = useState(0)
+    const [currentGenomes, setCurrentGenomes] = useState<Genome[]>([])
+    const targetReachedFiredRef = useRef(false)
 
     const creaturesRef = useRef<Creature[]>([])
     const phaseRef = useRef<EvolutionPhase>("idle")
@@ -114,22 +122,28 @@ export function useEvolution(props: UseEvolutionProps) {
             return
         }
 
-        const genomes = createInitialPopulation(topology, populationSize)
+        const startingGenomes = props.initialPopulation && props.initialPopulation.length > 0
+            ? props.initialPopulation
+            : createInitialPopulation(topology, populationSize)
+
+        const startingGeneration = props.initialGeneration ?? 1
         const spawnPos = { x: 100, y: groundY - 30 }
 
-        const initialCreatures = genomes.map((genome) =>
+        const initialCreatures = startingGenomes.map((genome) =>
             createCreatureFromTopology(topology, genome, spawnPos)
         )
 
         creaturesRef.current = initialCreatures
         setCreatures([...initialCreatures])
+        setCurrentGenomes(startingGenomes)
 
         phaseRef.current = "running"
         setPhase("running")
 
-        generationRef.current = 1
-        setGeneration(1)
+        generationRef.current = startingGeneration
+        setGeneration(startingGeneration)
 
+        targetReachedFiredRef.current = false
         timeAccumulatorRef.current = 0
         totalStepsRef.current = 0
         lastTimeRef.current = performance.now()
@@ -163,6 +177,8 @@ export function useEvolution(props: UseEvolutionProps) {
         setFitnessHistory([])
         setProgress(0)
         setBestCreatureEver(null)
+        setCurrentGenomes([])
+        targetReachedFiredRef.current = false
         if (animationFrameRef.current) {
             cancelAnimationFrame(animationFrameRef.current)
             animationFrameRef.current = 0
@@ -327,6 +343,23 @@ export function useEvolution(props: UseEvolutionProps) {
                 totalStepsRef.current += stepsToDo
                 setProgress(Math.round((totalStepsRef.current / TOTAL_GENERATION_STEPS) * 100))
 
+                // Target-reached detection: fire once per run
+                if (!targetReachedFiredRef.current) {
+                    const winner = creaturesRef.current.find((c) => c.reachedTarget)
+                    if (winner) {
+                        targetReachedFiredRef.current = true
+                        const cb = currentConfig.onTargetReached
+                        if (cb) {
+                            phaseRef.current = "paused"
+                            setPhase("paused")
+                            cancelAnimationFrame(animationFrameRef.current)
+                            animationFrameRef.current = 0
+                            cb({ ...winner })
+                            return
+                        }
+                    }
+                }
+
                 const now = performance.now()
                 if (now - lastUIRenderTimeRef.current > 33) {
                     setCreatures([...creaturesRef.current])
@@ -386,6 +419,8 @@ export function useEvolution(props: UseEvolutionProps) {
                 setProgress(0)
                 phaseRef.current = "running"
                 setPhase("running")
+                const nextGenomes = newCreatures.map((c) => c.genome)
+                setCurrentGenomes(nextGenomes)
                 if (!currentConfig.backgroundMode) setCreatures([...newCreatures])
                 animationFrameRef.current = requestAnimationFrame(loop)
             }
@@ -445,6 +480,7 @@ export function useEvolution(props: UseEvolutionProps) {
         progress,
         bestCreatureEver,
         fitnessHistory,
+        currentGenomes,
         start,
         stop,
         reset

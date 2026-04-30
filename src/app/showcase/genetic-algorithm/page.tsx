@@ -17,7 +17,7 @@ import {
 } from '@/core/physics';
 import { renderCreature, renderGround, renderTargetZone } from '@/components/creatures/CreatureRenderer';
 import { GenomeDisplay } from '@/components/genetics/GenomeDisplay';
-import { Button } from '@/components/ui/Button';
+import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/Panel';
 import { Creature, Genome } from '@/core/types';
 

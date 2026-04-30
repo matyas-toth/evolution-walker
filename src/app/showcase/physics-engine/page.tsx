@@ -15,8 +15,8 @@ import {
   checkCreatureTargetZone,
 } from '@/core/physics';
 import { renderCreature, renderGround, renderTargetZone } from '@/components/creatures/CreatureRenderer';
-import { Button } from '@/components/ui/Button';
-import { Slider } from '@/components/ui/Slider';
+import { Button } from '@/components/ui/button';
+import { Slider } from '@/components/ui/slider';
 import { Panel } from '@/components/ui/Panel';
 import { Creature, Muscle } from '@/core/types';
 

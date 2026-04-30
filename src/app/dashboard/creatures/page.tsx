@@ -15,6 +15,16 @@ export default async function CreaturesPage() {
     const creatures = await prisma.creature.findMany({
         where: { userId: session.user.id },
         orderBy: { updatedAt: "desc" },
+        include: {
+            _count: {
+                select: { trainingSessions: true }
+            },
+            trainingSessions: {
+                where: { reachedTarget: true },
+                select: { id: true },
+                take: 1
+            }
+        }
     })
 
     const serialized = creatures.map((c) => ({
@@ -23,6 +33,8 @@ export default async function CreaturesPage() {
         topology: c.topology as unknown as Topology,
         createdAt: c.createdAt.toISOString(),
         updatedAt: c.updatedAt.toISOString(),
+        _count: c._count,
+        hasReachedTarget: c.trainingSessions.length > 0
     }))
 
     return (

@@ -8,7 +8,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
-import { Plus, Pencil, Trash2, Dna, Brain } from "lucide-react"
+import { Plus, Pencil, Trash2, Dna, Brain, Trophy } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -31,6 +31,7 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { RunsBrowser } from "./RunsBrowser"
 import type { Topology } from "@/core/types"
 
 interface CreatureData {
@@ -141,6 +142,7 @@ export function CreaturesGrid({ creatures: initial }: CreaturesGridProps) {
     const [creating, setCreating] = useState(false)
     const [deleteTarget, setDeleteTarget] = useState<CreatureData | null>(null)
     const [deleting, setDeleting] = useState(false)
+    const [runsBrowserCreature, setRunsBrowserCreature] = useState<CreatureData | null>(null)
 
     async function handleCreate() {
         if (!newName.trim()) return
@@ -235,22 +237,38 @@ export function CreaturesGrid({ creatures: initial }: CreaturesGridProps) {
                 </div>
             ) : (
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {creatures.map((creature) => (
+                    {creatures.map((creature: any) => (
                         <div
                             key={creature.id}
                             className="group relative flex flex-col rounded-xl border border-border bg-card overflow-hidden transition-colors hover:border-primary/30"
                         >
-                            <div className="h-40 bg-background/50 p-4">
+                            <div className="h-40 bg-background/50 p-4 relative">
                                 <TopologyPreview topology={creature.topology} />
+                                {creature.hasReachedTarget && (
+                                    <div className="absolute top-3 right-3 bg-amber-500/20 text-amber-500 p-1.5 rounded-md border border-amber-500/30 backdrop-blur-sm shadow-sm" title="Has a run that reached the target">
+                                        <Trophy className="w-4 h-4" />
+                                    </div>
+                                )}
                             </div>
                             <div className="flex items-center justify-between p-4 border-t border-border">
                                 <div className="min-w-0 flex-1">
-                                    <h3 className="font-medium text-sm truncate">{creature.name}</h3>
+                                    <h3 className="font-medium text-sm truncate flex items-center gap-2">
+                                        {creature.name}
+                                    </h3>
                                     <p className="text-xs text-muted-foreground mt-0.5">
-                                        {creature.topology.particles.length} particles · {creature.topology.constraints.length} constraints · {creature.topology.muscles.length} muscles
+                                        {creature._count?.trainingSessions || 0} run{(creature._count?.trainingSessions || 0) !== 1 ? 's' : ''}
                                     </p>
                                 </div>
                                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8"
+                                        onClick={() => setRunsBrowserCreature(creature)}
+                                        title="View Runs & Leaderboard"
+                                    >
+                                        <Trophy className="h-4 w-4" />
+                                    </Button>
                                     <Button
                                         variant="ghost"
                                         size="icon"
@@ -303,6 +321,15 @@ export function CreaturesGrid({ creatures: initial }: CreaturesGridProps) {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
+
+            {runsBrowserCreature && (
+                <RunsBrowser
+                    creatureId={runsBrowserCreature.id}
+                    creatureName={runsBrowserCreature.name}
+                    open={!!runsBrowserCreature}
+                    onOpenChange={(o) => !o && setRunsBrowserCreature(null)}
+                />
+            )}
         </div>
     )
 }

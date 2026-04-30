@@ -7,14 +7,13 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Brain, Save, Play, Square, Loader2 } from "lucide-react"
-import type { UseEvolutionProps } from "@/hooks/useEvolution"
-import { saveGenome } from "@/app/actions/genomes"
-import { useRouter } from "next/navigation"
+import type { TrainingHubConfig } from "@/core/types"
+import { toast } from "sonner"
 
 interface TrainingSidebarProps {
     creatureId: string
-    config: Omit<UseEvolutionProps, "topology"> & { simulationSpeed: number }
-    onChangeConfig: (config: Omit<UseEvolutionProps, "topology"> & { simulationSpeed: number }) => void
+    config: TrainingHubConfig
+    onChangeConfig: (config: TrainingHubConfig) => void
     isRunning: boolean
     isPaused: boolean
     generation: number
@@ -22,7 +21,8 @@ interface TrainingSidebarProps {
     bestFitness: number
     onToggleStart: () => void
     onReset: () => void
-    bestGenome: any // the serialized genome of the best creature
+    onSaveProgress: (name: string) => Promise<void>
+    hasBestGenome: boolean
 }
 
 export function TrainingSidebar({
@@ -36,21 +36,20 @@ export function TrainingSidebar({
     bestFitness,
     onToggleStart,
     onReset,
-    bestGenome
+    onSaveProgress,
+    hasBestGenome,
 }: TrainingSidebarProps) {
-    const router = useRouter()
     const [saving, setSaving] = useState(false)
     const [runName, setRunName] = useState("")
 
     const handleSave = async () => {
-        if (!bestGenome) return
+        if (!hasBestGenome) return
         setSaving(true)
         try {
-            await saveGenome(creatureId, bestGenome, bestFitness, false, runName || `Generation ${generation}`)
-            alert("The genome has been saved successfully.")
-            router.refresh()
+            await onSaveProgress(runName)
+            toast.success("Progress saved successfully.")
         } catch (error: any) {
-            alert(`Error saving genome: ${error.message}`)
+            toast.error(`Error saving progress: ${error.message}`)
         } finally {
             setSaving(false)
         }
@@ -182,9 +181,9 @@ export function TrainingSidebar({
             </div>
 
             <div className="p-4 border-t border-border mt-auto shrink-0 space-y-3 bg-muted/30">
-                <Label>Save Custom Genome</Label>
+                <Label>Save Current Progress</Label>
                 <Input
-                    placeholder="E.g. Gen 50 Fast Sprinter"
+                    placeholder={`Run — Gen ${generation > 0 ? generation : 'N'}`}
                     value={runName}
                     onChange={e => setRunName(e.target.value)}
                     className="h-8 text-sm"
@@ -192,11 +191,11 @@ export function TrainingSidebar({
                 <Button
                     variant="secondary"
                     className="w-full text-sm"
-                    disabled={!bestGenome || saving || isRunning}
+                    disabled={!hasBestGenome || saving || isRunning}
                     onClick={handleSave}
                 >
                     {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-                    {saving ? "Saving..." : "Save Best Genome"}
+                    {saving ? "Saving..." : "Save Current Progress"}
                 </Button>
             </div>
         </div>
