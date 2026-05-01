@@ -183,7 +183,7 @@ export function TrainingSidebar({
             <div className="p-4 border-t border-border mt-auto shrink-0 space-y-3 bg-muted/30">
                 <Label>Save Current Progress</Label>
                 <Input
-                    placeholder={`Run — Gen ${generation > 0 ? generation : 'N'}`}
+                    placeholder={`Run, Gen ${generation > 0 ? generation : 'N'}`}
                     value={runName}
                     onChange={e => setRunName(e.target.value)}
                     className="h-8 text-sm"
