@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-04T00:00:00.000Z",
+  "environment": "development baseline before worker-owned engine",
+  "seed": 1831565813,
+  "topology": "stickman-default",
+  "runs": [
+    {
+      "populationSize": 500,
+      "generationDurationSeconds": 10,
+      "mode": "background",
+      "generationsObserved": 6,
+      "wallTimeMs": 2000,
+      "generationsPerSecond": 3,
+      "uiOperationLatencyMs": { "minimum": 500, "maximum": 650 }
+    }
+  ],
+  "notes": "Checked-in fixture for relative comparisons. Production benchmark runs append machine-specific results without replacing this observed baseline."
+}

@@ -168,6 +168,14 @@ export interface TrainingHubConfig {
   targetDistance: number
   backgroundMode: boolean
   simulationSpeed: number
+  /** Compute backend. Missing on older sessions and resolved to auto. */
+  backend?: 'auto' | 'webgpu' | 'wasm-simd' | 'wasm-scalar' | 'legacy'
+  /** Seed used by the deterministic training random stream. */
+  seed?: number
+  /** Worker pool size or automatic hardware-based selection. */
+  workerCount?: 'auto' | number
+  /** Maximum worker-to-UI update frequency. */
+  snapshotHz?: number
 }
 
 /**

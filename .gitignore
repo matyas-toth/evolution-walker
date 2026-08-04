@@ -44,6 +44,10 @@ next-env.d.ts
 
 /src/generated/prisma
 
+# Rust training engine build directories (the deployable WASM files live in /public)
+/src-wasm/training-engine/target/
+/src-wasm/training-engine/target-simd/
+
 .agent/
 
 .cursor/

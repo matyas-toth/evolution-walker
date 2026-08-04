@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Brain, Save, Play, Square, Loader2 } from "lucide-react"
-import type { TrainingHubConfig } from "@/core/types"
+import type { TrainingDiagnostics, TrainingHubConfig } from "@/core/types"
 import { toast } from "sonner"
 
 interface TrainingSidebarProps {
@@ -23,6 +23,9 @@ interface TrainingSidebarProps {
     onReset: () => void
     onSaveProgress: (name: string) => Promise<void>
     hasBestGenome: boolean
+    diagnostics: TrainingDiagnostics
+    engineError: string | null
+    pausePending: boolean
 }
 
 export function TrainingSidebar({
@@ -38,6 +41,9 @@ export function TrainingSidebar({
     onReset,
     onSaveProgress,
     hasBestGenome,
+    diagnostics,
+    engineError,
+    pausePending,
 }: TrainingSidebarProps) {
     const [saving, setSaving] = useState(false)
     const [runName, setRunName] = useState("")
@@ -84,6 +90,53 @@ export function TrainingSidebar({
                     </div>
                 </div>
 
+                <div className="grid grid-cols-2 gap-2 rounded-lg border border-border/70 bg-muted/40 p-2 text-[11px]">
+                    <div>
+                        <div className="text-muted-foreground">Engine</div>
+                        <div className="truncate font-mono font-medium">{diagnostics.backend}</div>
+                    </div>
+                    <div>
+                        <div className="text-muted-foreground">Throughput</div>
+                        <div className="font-mono font-medium">{diagnostics.generationsPerSecond.toFixed(2)} gen/s</div>
+                    </div>
+                    <div>
+                        <div className="text-muted-foreground">Workers</div>
+                        <div className="font-mono font-medium">{diagnostics.workerCount}</div>
+                    </div>
+                    <div>
+                        <div className="text-muted-foreground">Memory</div>
+                        <div className="font-mono font-medium">{(diagnostics.memoryBytes / 1048576).toFixed(1)} MB</div>
+                    </div>
+                    {process.env.NODE_ENV === "development" ? (
+                        <>
+                            <div>
+                                <div className="text-muted-foreground">Simulation</div>
+                                <div className="font-mono">{diagnostics.stageTimings.simulationMs.toFixed(1)} ms</div>
+                            </div>
+                            <div>
+                                <div className="text-muted-foreground">Transition</div>
+                                <div className="font-mono">
+                                    {(diagnostics.stageTimings.fitnessMs + diagnostics.stageTimings.evolutionMs + diagnostics.stageTimings.resetMs).toFixed(1)} ms
+                                </div>
+                            </div>
+                            <div>
+                                <div className="text-muted-foreground">Snapshots dropped</div>
+                                <div className="font-mono">{diagnostics.droppedSnapshots}</div>
+                            </div>
+                            <div>
+                                <div className="text-muted-foreground">Pause ack</div>
+                                <div className="font-mono">{pausePending ? "pending" : "ready"}</div>
+                            </div>
+                        </>
+                    ) : null}
+                </div>
+
+                {engineError ? (
+                    <p className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
+                        {engineError}
+                    </p>
+                ) : null}
+
                 <div className="flex gap-2">
                     <Button
                         variant={isRunning ? "destructive" : "default"}
@@ -115,6 +168,26 @@ export function TrainingSidebar({
                     <p className="text-xs text-muted-foreground">
                         Disable 60fps rendering to train at maximum CPU speed. Only recommended for large populations.
                     </p>
+                </div>
+
+                <div className="space-y-2">
+                    <Label htmlFor="training-backend">Compute Backend</Label>
+                    <select
+                        id="training-backend"
+                        disabled={isRunning}
+                        value={config.backend ?? "auto"}
+                        onChange={(event) => onChangeConfig({
+                            ...config,
+                            backend: event.target.value as NonNullable<TrainingHubConfig["backend"]>,
+                        })}
+                        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        <option value="auto">Auto</option>
+                        <option value="webgpu">WebGPU</option>
+                        <option value="wasm-simd">WASM SIMD</option>
+                        <option value="wasm-scalar">WASM Scalar</option>
+                        <option value="legacy">Legacy Benchmark</option>
+                    </select>
                 </div>
 
                 <div className="space-y-4">

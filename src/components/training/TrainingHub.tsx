@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { ArrowLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -42,6 +42,10 @@ function resolveInitialConfig(session?: SerializedSession): TrainingHubConfig {
         targetDistance: 1400,
         backgroundMode: false,
         simulationSpeed: 1,
+        backend: "auto",
+        seed: 0x6d2b79f5,
+        workerCount: "auto",
+        snapshotHz: 5,
     }
 }
 
@@ -50,6 +54,27 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
     const [config, setConfig] = useState<TrainingHubConfig>(resolveInitialConfig(initialSession))
     const [replayPhase, setReplayPhase] = useState<ReplayPhase>({ type: "none" })
     const [isSaving, setIsSaving] = useState(false)
+
+    useEffect(() => {
+        const query = new URLSearchParams(window.location.search)
+        const requested = query.get("backend")
+        const population = Number(query.get("population"))
+        const duration = Number(query.get("duration"))
+        const seed = Number(query.get("seed"))
+        setConfig((current) => ({
+            ...current,
+            backend: ["auto", "webgpu", "wasm-simd", "wasm-scalar", "legacy"].includes(requested ?? "")
+                ? requested as NonNullable<TrainingHubConfig["backend"]>
+                : current.backend,
+            populationSize: Number.isFinite(population) && population >= 10 && population <= 2000
+                ? Math.round(population)
+                : current.populationSize,
+            generationDuration: Number.isFinite(duration) && duration >= 3 && duration <= 30
+                ? Math.round(duration)
+                : current.generationDuration,
+            seed: query.has("seed") && Number.isFinite(seed) ? seed >>> 0 : current.seed,
+        }))
+    }, [])
 
     const { replayCreature, replayProgress, startReplay, stopReplay } = useReplay(topology)
 
@@ -73,7 +98,10 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
         progress,
         fitnessHistory,
         bestCreatureEver,
-        currentGenomes,
+        diagnostics,
+        error,
+        pausePending,
+        exportSession,
         start,
         stop,
         reset,
@@ -92,11 +120,12 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
         if (replayPhase.type !== "active") return
         setIsSaving(true)
         try {
+            const engineState = await exportSession()
             await saveTrainingSession({
                 creatureId,
                 name: runName || `Gen ${generation} — Target Reached`,
                 config,
-                population: currentGenomes,
+                population: engineState.population,
                 bestGenome: replayPhase.genome,
                 bestFitness: bestCreatureEver?.fitness?.total ?? 0,
                 generation,
@@ -109,7 +138,7 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
         } finally {
             setIsSaving(false)
         }
-    }, [replayPhase, creatureId, config, currentGenomes, generation, bestCreatureEver, stopReplay, router])
+    }, [replayPhase, creatureId, config, generation, bestCreatureEver, exportSession, stopReplay, router])
 
     const handleContinue = useCallback((newTargetDistance: number) => {
         stopReplay()
@@ -123,17 +152,18 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
 
     const handleSaveProgress = useCallback(async (runName: string) => {
         if (!bestCreatureEver) return
+        const engineState = await exportSession()
         await saveTrainingSession({
             creatureId,
             name: runName || `Gen ${generation}`,
             config,
-            population: currentGenomes,
+            population: engineState.population,
             bestGenome: bestCreatureEver.genome,
             bestFitness: bestCreatureEver.fitness?.total ?? 0,
             generation,
             reachedTarget: false,
         })
-    }, [creatureId, config, currentGenomes, generation, bestCreatureEver])
+    }, [creatureId, config, generation, bestCreatureEver, exportSession])
 
     return (
         <div className="flex flex-col h-screen overflow-hidden bg-background">
@@ -204,6 +234,9 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
                     onReset={reset}
                     onSaveProgress={handleSaveProgress}
                     hasBestGenome={!!bestCreatureEver}
+                    diagnostics={diagnostics}
+                    engineError={error}
+                    pausePending={pausePending}
                 />
             </div>
         </div>

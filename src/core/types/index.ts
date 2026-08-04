@@ -37,3 +37,18 @@ export type {
   TopologyConstraint,
   TopologyMuscle,
 } from './topology';
+
+export type {
+  TrainingBackend,
+  ActiveTrainingBackend,
+  TrainingWorkerCount,
+  TrainingEnginePhase,
+  TrainingStageTimings,
+  TrainingDiagnostics,
+  PackedRenderSnapshot,
+  TrainingSnapshot,
+  TrainingEngineState,
+  TrainingEngineConfig,
+  TrainingCommand,
+  TrainingEvent,
+} from '../training/types';

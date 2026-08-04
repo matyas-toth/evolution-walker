@@ -6,6 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "build:wasm": "wat2wasm src-wasm/scripts/physics-scripts.wat -o public/physics.wasm",
+    "build:engine": "node scripts/build-training-engine.mjs",
+    "test:engine": "cargo test --manifest-path src-wasm/training-engine/Cargo.toml --target x86_64-pc-windows-msvc",
     "start": "next start"
   },
   "dependencies": {
