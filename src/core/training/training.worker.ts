@@ -98,7 +98,7 @@ async function selectAutoBackend(): Promise<ActiveTrainingBackend> {
 }
 
 /** Builds a fresh persistent engine from the latest serializable inputs. */
-async function initializeEngine(): Promise<void> {
+async function initializeEngine(emitReady = true): Promise<void> {
     if (!topology || !config) return
     droppedSnapshots = 0
     pendingGeneration = null
@@ -159,7 +159,28 @@ async function initializeEngine(): Promise<void> {
     const snapshot = engine.getSnapshot(phase, false)
     decorateSnapshot(snapshot)
     emit({ type: "backendChanged", backend: activeBackend, workerCount: snapshot.diagnostics.workerCount })
-    emit({ type: "ready", snapshot })
+    if (emitReady) emit({ type: "ready", snapshot })
+}
+
+/** Replays the current genomes to the previous progress after a backend-only migration. */
+async function restoreGenerationProgress(targetProgress: number): Promise<void> {
+    if (!engine || !config || targetProgress <= 0) return
+    const runtimeConfig = config
+    const replayConfig: TrainingEngineConfig = { ...runtimeConfig, backgroundMode: false }
+    engine.updateConfig(replayConfig)
+    const totalSteps = Math.max(1, Math.round(runtimeConfig.generationDuration * 60))
+    while (engine.getProgress() + 0.01 < targetProgress) {
+        const remainingSteps = Math.max(
+            1,
+            Math.ceil((targetProgress - engine.getProgress()) / 100 * totalSteps),
+        )
+        const completed = await engine.runChunk(
+            Math.min(PHYSICS_CHUNK_STEPS, remainingSteps),
+            PHYSICS_CHUNK_BUDGET_MS,
+        )
+        if (completed) break
+    }
+    engine.updateConfig(runtimeConfig)
 }
 
 /** Creates a bounded snapshot at the configured UI frequency. */
@@ -304,14 +325,33 @@ async function handleCommand(command: TrainingCommand): Promise<void> {
                 await initializeEngine()
                 break
             case "updateConfig": {
-                const requiresRebuild = !config
-                    || config.populationSize !== command.config.populationSize
-                    || config.generationDuration !== command.config.generationDuration
-                    || config.seed !== command.config.seed
-                    || config.backend !== command.config.backend
-                    || config.workerCount !== command.config.workerCount
+                const previousConfig = config
+                const backendChanged = Boolean(previousConfig && previousConfig.backend !== command.config.backend)
+                const requiresFreshPopulation = !previousConfig
+                    || previousConfig.populationSize !== command.config.populationSize
+                    || previousConfig.generationDuration !== command.config.generationDuration
+                    || previousConfig.seed !== command.config.seed
+                    || previousConfig.workerCount !== command.config.workerCount
                 config = command.config
-                if (requiresRebuild) {
+                if (backendChanged && !requiresFreshPopulation && engine) {
+                    const previousPhase = phase
+                    const resumeAfterMigration = running
+                    const previousProgress = engine.getProgress()
+                    const checkpoint = await engine.exportState()
+                    running = false
+                    initialPopulation = checkpoint.population
+                    initialGeneration = checkpoint.generation
+                    await initializeEngine(false)
+                    await restoreGenerationProgress(previousProgress)
+                    phase = previousPhase
+                    const migratedSnapshot = engine.getSnapshot(phase, !config.backgroundMode)
+                    decorateSnapshot(migratedSnapshot)
+                    emit(phase === "paused"
+                        ? { type: "paused", snapshot: migratedSnapshot }
+                        : { type: "snapshot", snapshot: migratedSnapshot })
+                    running = resumeAfterMigration
+                    if (running) scheduleChunk()
+                } else if (requiresFreshPopulation) {
                     running = false
                     initialPopulation = undefined
                     initialGeneration = 1
