@@ -5,7 +5,7 @@ import type { ActiveTrainingBackend, Genome, Topology, TrainingEngineConfig } fr
 
 type ShardCommand =
     | { id: number; type: "init"; topology: Topology; config: TrainingEngineConfig; population?: Genome[]; generation: number; backend: ActiveTrainingBackend }
-    | { id: number; type: "run"; maxSteps: number; budgetMs: number }
+    | { id: number; type: "run"; maxSteps: number; budgetMs: number; includeRender: boolean }
     | { id: number; type: "finish" }
     | { id: number; type: "update"; config: TrainingEngineConfig }
     | { id: number; type: "export" }
@@ -25,7 +25,11 @@ scope.onmessage = async (message: MessageEvent<ShardCommand>) => {
             case "run": {
                 if (!engine) throw new Error("Shard is not initialized")
                 const completed = engine.runChunk(command.maxSteps, command.budgetMs)
-                scope.postMessage({ id: command.id, completed, progress: engine.getProgress() })
+                const snapshot = command.includeRender ? engine.getSnapshot("running", true) : undefined
+                const transfer: Transferable[] = snapshot?.render
+                    ? [snapshot.render.positions.buffer, snapshot.render.centers.buffer]
+                    : []
+                scope.postMessage({ id: command.id, completed, progress: engine.getProgress(), snapshot }, transfer)
                 break
             }
             case "finish": {

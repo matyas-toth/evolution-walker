@@ -96,7 +96,7 @@ export function TrainingSidebar({
                         <div className="truncate font-mono font-medium">{diagnostics.backend}</div>
                     </div>
                     <div>
-                        <div className="text-muted-foreground">Throughput</div>
+                        <div className="text-muted-foreground">{config.backgroundMode ? "Throughput" : "Paced rate"}</div>
                         <div className="font-mono font-medium">{diagnostics.generationsPerSecond.toFixed(2)} gen/s</div>
                     </div>
                     <div>
@@ -166,7 +166,7 @@ export function TrainingSidebar({
                         />
                     </div>
                     <p className="text-xs text-muted-foreground">
-                        Disable 60fps rendering to train at maximum CPU speed. Only recommended for large populations.
+                        Runs unpaced at maximum compute throughput and disables live rendering. Only recommended for large populations.
                     </p>
                 </div>
 

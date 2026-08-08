@@ -118,9 +118,18 @@ export class MulticoreWasmTrainingEngine implements TrainingBackendEngine {
     async runChunk(maxSteps: number, budgetMs: number): Promise<boolean> {
         if (this.progress === 0) this.timings.simulationMs = 0
         const startedAt = performance.now()
-        const responses = await Promise.all(this.shards.map((shard) => shard.client.request({ type: "run", maxSteps, budgetMs })))
+        const responses = await Promise.all(this.shards.map((shard) => shard.client.request({
+            type: "run",
+            maxSteps,
+            budgetMs,
+            includeRender: !this.config.backgroundMode,
+        })))
         this.timings.simulationMs += performance.now() - startedAt
         this.progress = responses.reduce((sum, response) => sum + (response.progress ?? 0), 0) / responses.length
+        if (!this.config.backgroundMode) {
+            this.lastRender = this.combineRenderSnapshots(responses)
+            this.memoryBytes = responses.reduce((sum, response) => sum + (response.snapshot?.diagnostics.memoryBytes ?? 0), 0)
+        }
         if (!responses.every((response) => response.completed)) return false
 
         const transitionStarted = performance.now()

@@ -157,7 +157,7 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
         let completed = false
         do {
             completed = this.exports.training_run_steps(maxSteps) !== 0
-        } while (!completed && performance.now() - startedAt < budgetMs)
+        } while (this.config.backgroundMode && !completed && performance.now() - startedAt < budgetMs)
         const elapsed = performance.now() - startedAt
         this.lastSimulationMs += elapsed
         this.timings.simulationMs = this.lastSimulationMs

@@ -335,7 +335,10 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
         if (this.deviceLost) throw new Error("WebGPU device was lost")
         if (this.currentStep === 0) this.timings.simulationMs = 0
         const totalSteps = Math.max(1, Math.round(this.config.generationDuration * 60))
-        const stepCount = Math.min(maxSteps * 10, totalSteps - this.currentStep)
+        const stepCount = Math.min(
+            this.config.backgroundMode ? maxSteps * 10 : maxSteps,
+            totalSteps - this.currentStep,
+        )
         const params = new Float32Array([
             this.config.populationSize, this.topology.particles.length,
             this.topology.constraints.length + this.topology.muscles.length,
@@ -352,12 +355,13 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
         pass.dispatchWorkgroups(Math.ceil(this.config.populationSize / WORKGROUP_SIZE))
         pass.end()
         const completed = this.currentStep + stepCount >= totalSteps
-        if (completed) {
+        const shouldReadback = completed || !this.config.backgroundMode
+        if (shouldReadback) {
             encoder.copyBufferToBuffer(this.stateBuffer, 0, this.stateReadBuffer, 0, this.state.byteLength)
             encoder.copyBufferToBuffer(this.metricsBuffer, 0, this.metricsReadBuffer, 0, this.metrics.byteLength)
         }
         this.device.queue.submit([encoder.finish()])
-        if (completed) await this.readGenerationBuffers()
+        if (shouldReadback) await this.readGenerationBuffers()
         else await this.device.queue.onSubmittedWorkDone()
         this.currentStep += stepCount
         this.timings.simulationMs += performance.now() - startedAt

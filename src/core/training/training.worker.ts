@@ -18,6 +18,7 @@ import type {
 const workerScope: DedicatedWorkerGlobalScope = self as unknown as DedicatedWorkerGlobalScope
 const PHYSICS_CHUNK_STEPS = 24
 const PHYSICS_CHUNK_BUDGET_MS = 35
+const VISIBLE_SNAPSHOT_HZ = 30
 
 let engine: TrainingBackendEngine | null = null
 let topology: Topology | null = null
@@ -41,6 +42,16 @@ function emit(event: TrainingEvent): void {
         transfer.push(event.snapshot.render.positions.buffer, event.snapshot.render.centers.buffer)
     }
     workerScope.postMessage(event, transfer)
+}
+
+/** Adds coordinator-owned pacing and delivery diagnostics to a backend snapshot. */
+function decorateSnapshot(snapshot: TrainingSnapshot): void {
+    if (!config) return
+    snapshot.diagnostics.backend = activeBackend
+    snapshot.diagnostics.droppedSnapshots = droppedSnapshots
+    if (!config.backgroundMode && snapshot.phase !== "idle") {
+        snapshot.diagnostics.generationsPerSecond = config.simulationSpeed / config.generationDuration
+    }
 }
 
 /** Resolves the requested accelerated backend before concrete initialization. */
@@ -146,8 +157,7 @@ async function initializeEngine(): Promise<void> {
     }
     phase = "idle"
     const snapshot = engine.getSnapshot(phase, false)
-    snapshot.diagnostics.backend = activeBackend
-    snapshot.diagnostics.droppedSnapshots = droppedSnapshots
+    decorateSnapshot(snapshot)
     emit({ type: "backendChanged", backend: activeBackend, workerCount: snapshot.diagnostics.workerCount })
     emit({ type: "ready", snapshot })
 }
@@ -156,15 +166,14 @@ async function initializeEngine(): Promise<void> {
 function emitSnapshot(force = false): void {
     if (!engine || !config) return
     const now = performance.now()
-    const interval = 1000 / (config.backgroundMode ? config.snapshotHz : Math.max(30, config.snapshotHz))
+    const interval = 1000 / (config.backgroundMode ? config.snapshotHz : Math.max(VISIBLE_SNAPSHOT_HZ, config.snapshotHz))
     if (!force && now - lastSnapshotAt < interval) {
         droppedSnapshots++
         return
     }
     lastSnapshotAt = now
     const snapshot = engine.getSnapshot(phase, !config.backgroundMode)
-    snapshot.diagnostics.backend = activeBackend
-    snapshot.diagnostics.droppedSnapshots = droppedSnapshots
+    decorateSnapshot(snapshot)
     emit({ type: "snapshot", snapshot })
 }
 
@@ -172,7 +181,7 @@ function emitSnapshot(force = false): void {
 function emitPendingGeneration(force = false): void {
     if (!pendingGeneration || !config) return
     const now = performance.now()
-    const interval = 1000 / (config.backgroundMode ? config.snapshotHz : Math.max(30, config.snapshotHz))
+    const interval = 1000 / (config.backgroundMode ? config.snapshotHz : Math.max(VISIBLE_SNAPSHOT_HZ, config.snapshotHz))
     if (!force && now - lastGenerationEventAt < interval) return
     lastGenerationEventAt = now
     const evaluated = pendingGeneration
@@ -191,9 +200,14 @@ async function runChunk(): Promise<void> {
     scheduled = false
     if (!running || disposed || !engine || !config) return
     phase = "running"
+    const progressBefore = engine.getProgress()
+    const chunkStartedAt = performance.now()
     let completed: boolean
     try {
-        completed = await engine.runChunk(PHYSICS_CHUNK_STEPS, PHYSICS_CHUNK_BUDGET_MS)
+        const chunkSteps = config.backgroundMode
+            ? PHYSICS_CHUNK_STEPS
+            : Math.max(1, Math.min(PHYSICS_CHUNK_STEPS, Math.round(config.simulationSpeed * 2)))
+        completed = await engine.runChunk(chunkSteps, PHYSICS_CHUNK_BUDGET_MS)
     } catch (backendError) {
         if (!topology || !config) throw backendError
         const checkpoint = await engine.exportState()
@@ -210,6 +224,13 @@ async function runChunk(): Promise<void> {
         scheduleChunk()
         return
     }
+    const chunkComputeMs = performance.now() - chunkStartedAt
+    const progressAfter = completed ? 100 : engine.getProgress()
+    const simulatedMilliseconds = Math.max(0, progressAfter - progressBefore) / 100
+        * config.generationDuration * 1000
+    const pacingDelayMs = config.backgroundMode
+        ? 0
+        : Math.max(0, simulatedMilliseconds / config.simulationSpeed - chunkComputeMs)
     emitSnapshot(false)
 
     if (completed) {
@@ -225,8 +246,7 @@ async function runChunk(): Promise<void> {
             phase = "paused"
             emit({ type: "targetReached", genome: evaluated.targetGenome, generation: evaluated.generation })
             const pausedSnapshot = engine.getSnapshot(phase, !config.backgroundMode)
-            pausedSnapshot.diagnostics.backend = activeBackend
-            pausedSnapshot.diagnostics.droppedSnapshots = droppedSnapshots
+            decorateSnapshot(pausedSnapshot)
             emit({ type: "paused", snapshot: pausedSnapshot })
             return
         }
@@ -234,15 +254,15 @@ async function runChunk(): Promise<void> {
         emitSnapshot(false)
     }
 
-    scheduleChunk()
+    scheduleChunk(pacingDelayMs)
 }
 
-function scheduleChunk(): void {
+function scheduleChunk(delayMs = 0): void {
     if (scheduled || !running || disposed) return
     scheduled = true
     setTimeout(() => {
         commandQueue = commandQueue.then(() => runChunk())
-    }, 0)
+    }, delayMs)
 }
 
 let commandQueue = Promise.resolve()
@@ -273,8 +293,7 @@ async function handleCommand(command: TrainingCommand): Promise<void> {
                 emitPendingGeneration(true)
                 if (engine && config) {
                     const pausedSnapshot = engine.getSnapshot(phase, !config.backgroundMode)
-                    pausedSnapshot.diagnostics.backend = activeBackend
-                    pausedSnapshot.diagnostics.droppedSnapshots = droppedSnapshots
+                    decorateSnapshot(pausedSnapshot)
                     emit({ type: "paused", snapshot: pausedSnapshot })
                 }
                 break
@@ -299,6 +318,11 @@ async function handleCommand(command: TrainingCommand): Promise<void> {
                     await initializeEngine()
                 } else {
                     engine?.updateConfig(command.config)
+                    if (!running && engine) {
+                        const updatedSnapshot = engine.getSnapshot(phase, !command.config.backgroundMode)
+                        decorateSnapshot(updatedSnapshot)
+                        emit({ type: "snapshot", snapshot: updatedSnapshot })
+                    }
                 }
                 break
             }

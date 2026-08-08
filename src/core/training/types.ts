@@ -91,7 +91,7 @@ export function resolveTrainingEngineConfig(config: TrainingHubConfig): Training
         parentsTopPercent: config.parentsTopPercent,
         targetDistance: config.targetDistance,
         backgroundMode: config.backgroundMode,
-        simulationSpeed: config.simulationSpeed,
+        simulationSpeed: Math.max(0.1, Math.min(100, config.simulationSpeed)),
         backend: config.backend ?? "auto",
         seed: config.seed ?? 0x6d2b79f5,
         workerCount: config.workerCount ?? "auto",
