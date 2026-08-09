@@ -6,11 +6,22 @@ import type {
     Topology,
     TrainingEngineConfig,
     TrainingEngineState,
+    LocomotionCurriculumStage,
+    LocomotionMetrics,
     TrainingSnapshot,
     TrainingStageTimings,
 } from "@/core/types"
 import type { EvaluatedGeneration, TrainingBackendEngine } from "./engineBackend"
 import { captureReplayFrames } from "./replayCapture"
+import {
+    BehaviorArchive,
+    calculateLocomotionMetrics,
+    compileFunctionalAnatomy,
+    emptyLocomotionMetrics,
+    rankPareto,
+    resolveCurriculumStage,
+    type CompiledFunctionalAnatomy,
+} from "./locomotion"
 
 const FIXED_TIMESTEP = 1 / 60
 const GRAVITY = 200
@@ -22,6 +33,8 @@ const TWO_PI = Math.PI * 2
 const UPRIGHT_WEIGHT = 50
 const TARGET_BONUS = 1000
 const DEATH_PENALTY = -500
+const GENE_STRIDE = 6
+const WARMUP_STEPS = 30
 
 interface CompiledTopology {
     particleCount: number
@@ -39,6 +52,7 @@ interface CompiledTopology {
     constraintStiffness: Float32Array
     constraintMuscle: Int16Array
     muscleIds: string[]
+    anatomy: CompiledFunctionalAnatomy
 }
 
 /** Small deterministic generator used for reproducible population creation and evolution. */
@@ -125,6 +139,7 @@ function compileTopology(topology: Topology): CompiledTopology {
         constraintStiffness,
         constraintMuscle,
         muscleIds: topology.muscles.map((muscle) => muscle.id),
+        anatomy: compileFunctionalAnatomy(topology),
     }
 }
 
@@ -155,6 +170,34 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
     private maxDistance: Float32Array
     private minHeadY: Float32Array
     private fitness: Float32Array
+    private locomotionMetrics: LocomotionMetrics[]
+    private paretoOrder: number[]
+    private readonly archive: BehaviorArchive
+    private bestMetrics: LocomotionMetrics = emptyLocomotionMetrics()
+    private curriculumStage: LocomotionCurriculumStage = "discovery"
+    private stanceSteps: Uint32Array
+    private strikeCounts: Uint16Array
+    private intervalMeans: Float32Array
+    private intervalM2: Float32Array
+    private lastStrikeStep: Int32Array
+    private groupWasGrounded: Uint8Array
+    private currentGroupGrounded: Uint8Array
+    private stanceSlip: Float32Array
+    private actuatorWork: Float32Array
+    private evaluatedSteps: Uint32Array
+    private survivalSteps: Uint32Array
+    private protectedClearSteps: Uint32Array
+    private coreHeightSum: Float32Array
+    private airborneSteps: Uint32Array
+    private pairedOpposedSteps: Float32Array
+    private pairedSamples: Uint32Array
+    private landingImpactSq: Float32Array
+    private landingCount: Uint32Array
+    private verticalJerkSq: Float32Array
+    private previousCoreVelocity: Float32Array
+    private previousCoreY: Float32Array
+    private sustainedProgressSum: Float32Array
+    private targetReachedStep: Int32Array
     private oscillatorSin: Float32Array
     private oscillatorCos: Float32Array
     private oscillatorStepSin: Float32Array
@@ -180,6 +223,8 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
         config: TrainingEngineConfig,
         initialPopulation?: Genome[],
         initialGeneration = 1,
+        initialArchive?: TrainingEngineState["archive"],
+        initialBestMetrics?: LocomotionMetrics,
     ) {
         const startedAt = performance.now()
         this.topologyDefinition = topology
@@ -187,13 +232,16 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
         this.config = config
         this.populationSize = config.populationSize
         this.generation = initialGeneration
+        this.archive = new BehaviorArchive(initialArchive)
+        this.bestMetrics = initialBestMetrics ?? emptyLocomotionMetrics()
         this.totalSteps = 0
         this.totalGenerationSteps = Math.max(1, Math.round(config.generationDuration / FIXED_TIMESTEP))
         this.spawnY = 600 - 30
         this.rng = new XorShift32(config.seed)
 
-        const genomeValueCount = this.populationSize * this.topology.muscleCount * 3
+        const genomeValueCount = this.populationSize * this.topology.muscleCount * GENE_STRIDE
         const particleValueCount = this.populationSize * this.topology.particleCount
+        const groupValueCount = this.populationSize * this.topology.anatomy.contactGroups.length
         this.genomes = new Float32Array(genomeValueCount)
         this.genomeIds = new Uint32Array(this.populationSize)
         this.parentA = new Uint32Array(this.populationSize)
@@ -209,6 +257,31 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
         this.maxDistance = new Float32Array(this.populationSize)
         this.minHeadY = new Float32Array(this.populationSize)
         this.fitness = new Float32Array(this.populationSize)
+        this.locomotionMetrics = Array.from({ length: this.populationSize }, emptyLocomotionMetrics)
+        this.paretoOrder = Array.from({ length: this.populationSize }, (_, index) => index)
+        this.stanceSteps = new Uint32Array(groupValueCount)
+        this.strikeCounts = new Uint16Array(groupValueCount)
+        this.intervalMeans = new Float32Array(groupValueCount)
+        this.intervalM2 = new Float32Array(groupValueCount)
+        this.lastStrikeStep = new Int32Array(groupValueCount)
+        this.groupWasGrounded = new Uint8Array(groupValueCount)
+        this.currentGroupGrounded = new Uint8Array(groupValueCount)
+        this.stanceSlip = new Float32Array(this.populationSize)
+        this.actuatorWork = new Float32Array(this.populationSize)
+        this.evaluatedSteps = new Uint32Array(this.populationSize)
+        this.survivalSteps = new Uint32Array(this.populationSize)
+        this.protectedClearSteps = new Uint32Array(this.populationSize)
+        this.coreHeightSum = new Float32Array(this.populationSize)
+        this.airborneSteps = new Uint32Array(this.populationSize)
+        this.pairedOpposedSteps = new Float32Array(this.populationSize)
+        this.pairedSamples = new Uint32Array(this.populationSize)
+        this.landingImpactSq = new Float32Array(this.populationSize)
+        this.landingCount = new Uint32Array(this.populationSize)
+        this.verticalJerkSq = new Float32Array(this.populationSize)
+        this.previousCoreVelocity = new Float32Array(this.populationSize)
+        this.previousCoreY = new Float32Array(this.populationSize)
+        this.sustainedProgressSum = new Float32Array(this.populationSize)
+        this.targetReachedStep = new Int32Array(this.populationSize)
         this.oscillatorSin = new Float32Array(this.populationSize * this.topology.muscleCount)
         this.oscillatorCos = new Float32Array(this.populationSize * this.topology.muscleCount)
         this.oscillatorStepSin = new Float32Array(this.populationSize * this.topology.muscleCount)
@@ -251,8 +324,8 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
         const fitnessStartedAt = performance.now()
         let bestFitness = Number.NEGATIVE_INFINITY
         let averageFitness = 0
-        let bestIndex = 0
         let targetIndex = -1
+        const groupCount = this.topology.anatomy.contactGroups.length
 
         for (let creature = 0; creature < this.populationSize; creature++) {
             const distance = this.maxDistance[creature] - this.spawnX
@@ -267,19 +340,77 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
             const total = distance + targetBonus + uprightBonus + deathPenalty
             this.fitness[creature] = total
             averageFitness += total
-            if (total > bestFitness) {
-                bestFitness = total
-                bestIndex = creature
+            bestFitness = Math.max(bestFitness, total)
+            const evaluatedSteps = Math.max(1, this.evaluatedSteps[creature])
+            const groupBase = creature * groupCount
+            let pairBalance = 0
+            let pairCount = 0
+            for (let group = 0; group < groupCount; group++) {
+                const paired = this.topology.anatomy.contactGroups[group].pairedGroup
+                if (paired <= group) continue
+                const left = this.strikeCounts[groupBase + group]
+                const right = this.strikeCounts[groupBase + paired]
+                pairBalance += Math.min(left, right) / Math.max(1, left, right)
+                pairCount++
             }
-            if (targetIndex < 0 && this.reachedTarget[creature]) targetIndex = creature
+            const metrics = calculateLocomotionMetrics({
+                progress: distance / this.topology.anatomy.bodyScale,
+                sustainedProgress: this.sustainedProgressSum[creature] / evaluatedSteps,
+                survivalRatio: this.survivalSteps[creature] / evaluatedSteps,
+                stanceSteps: this.stanceSteps.subarray(groupBase, groupBase + groupCount),
+                strikeCounts: this.strikeCounts.subarray(groupBase, groupBase + groupCount),
+                intervalMeans: this.intervalMeans.subarray(groupBase, groupBase + groupCount),
+                intervalM2: this.intervalM2.subarray(groupBase, groupBase + groupCount),
+                stanceSlip: this.stanceSlip[creature],
+                protectedClearRatio: this.protectedClearSteps[creature] / evaluatedSteps,
+                coreHeightRatio: this.coreHeightSum[creature] / evaluatedSteps,
+                landingImpactRms: Math.sqrt(this.landingImpactSq[creature] / Math.max(1, this.landingCount[creature])),
+                verticalJerkRms: Math.sqrt(this.verticalJerkSq[creature] / evaluatedSteps),
+                actuatorWork: this.actuatorWork[creature],
+                airborneRatio: this.airborneSteps[creature] / evaluatedSteps,
+                pairedOpposition: this.pairedSamples[creature]
+                    ? this.pairedOpposedSteps[creature] / this.pairedSamples[creature]
+                    : -1,
+                pairedBalance: pairCount ? pairBalance / pairCount : -1,
+                totalMass: this.topology.anatomy.totalMass,
+                bodyScale: this.topology.anatomy.bodyScale,
+            })
+            this.locomotionMetrics[creature] = metrics
+            this.archive.consider(metrics, () => this.materializeGenome(
+                this.copyGenome(creature), this.genomeIds[creature], this.generation,
+                this.parentA[creature], this.parentB[creature],
+            ))
         }
         averageFitness /= this.populationSize
+        const pareto = rankPareto(this.locomotionMetrics)
+        this.paretoOrder = this.config.fitnessVersion === "distance-v1"
+            ? Array.from({ length: this.populationSize }, (_, index) => index).sort((left, right) => this.fitness[right] - this.fitness[left])
+            : pareto.order
+        const bestIndex = this.paretoOrder[0] ?? 0
+        for (let creature = 0; creature < this.populationSize; creature++) {
+            if (!this.reachedTarget[creature]) continue
+            if (targetIndex < 0
+                || this.locomotionMetrics[creature].locomotionQuality > this.locomotionMetrics[targetIndex].locomotionQuality
+                || (this.locomotionMetrics[creature].locomotionQuality === this.locomotionMetrics[targetIndex].locomotionQuality
+                    && this.targetReachedStep[creature] < this.targetReachedStep[targetIndex])
+                || (this.locomotionMetrics[creature].locomotionQuality === this.locomotionMetrics[targetIndex].locomotionQuality
+                    && this.targetReachedStep[creature] === this.targetReachedStep[targetIndex]
+                    && this.locomotionMetrics[creature].transportCost < this.locomotionMetrics[targetIndex].transportCost)) {
+                targetIndex = creature
+            }
+        }
+        this.curriculumStage = resolveCurriculumStage(this.locomotionMetrics, this.archive.coverage())
         this.timings.fitnessMs = performance.now() - fitnessStartedAt
 
-        if (bestFitness > this.bestFitness) {
-            this.bestFitness = bestFitness
+        const championMetrics = this.locomotionMetrics[bestIndex]
+        if (!this.bestGenome
+            || championMetrics.progress > this.bestMetrics.progress
+            || (championMetrics.progress === this.bestMetrics.progress
+                && championMetrics.locomotionQuality > this.bestMetrics.locomotionQuality)) {
             this.bestGenome = this.copyGenome(bestIndex)
+            this.bestMetrics = { ...championMetrics, descriptor: [...championMetrics.descriptor] }
         }
+        this.bestFitness = Math.max(this.bestFitness, bestFitness)
 
         const evaluated: EvaluatedGeneration = {
             generation: this.generation,
@@ -303,6 +434,10 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
                     this.parentB[targetIndex],
                 )
                 : null,
+            bestMetrics: championMetrics,
+            targetMetrics: targetIndex >= 0 ? this.locomotionMetrics[targetIndex] : null,
+            archiveCoverage: this.archive.coverage(),
+            curriculumStage: this.curriculumStage,
         }
         this.lastEvaluated = evaluated
 
@@ -331,6 +466,9 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
             progress: this.getProgress(),
             bestFitness: Number.isFinite(this.bestFitness) ? this.bestFitness : 0,
             averageFitness: this.lastEvaluated?.averageFitness ?? 0,
+            bestMetrics: this.lastEvaluated?.bestMetrics ?? this.bestMetrics,
+            archiveCoverage: this.archive.coverage(),
+            curriculumStage: this.curriculumStage,
             diagnostics: {
                 backend: "wasm-scalar",
                 workerCount: 1,
@@ -367,6 +505,8 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
             bestGenome: this.getBestGenome(),
             bestFitness: Number.isFinite(this.bestFitness) ? this.bestFitness : 0,
             generation: this.generation,
+            archive: this.archive.export(),
+            bestMetrics: this.bestMetrics,
         }
     }
 
@@ -393,11 +533,16 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
             const source = initialPopulation?.[creature]
             this.genomeIds[creature] = this.nextGenomeId++
             for (let muscle = 0; muscle < this.topology.muscleCount; muscle++) {
-                const base = (creature * this.topology.muscleCount + muscle) * 3
+                const base = (creature * this.topology.muscleCount + muscle) * GENE_STRIDE
                 const gene = source?.genes.find((candidate) => candidate.muscleId === this.topology.muscleIds[muscle])
                 this.genomes[base] = gene?.amplitude ?? this.rng.next() * 0.5 + 0.1
                 this.genomes[base + 1] = gene?.frequency ?? this.rng.next() * 2 + 0.1
                 this.genomes[base + 2] = gene?.phase ?? this.rng.next() * TWO_PI
+                const legacyController = this.config.fitnessVersion === "distance-v1"
+                const neutralController = legacyController || Boolean(source)
+                this.genomes[base + 3] = gene?.couplingStrength ?? (neutralController ? 0 : this.rng.next() * 0.25)
+                this.genomes[base + 4] = gene?.contactReflexGain ?? (neutralController ? 0 : (this.rng.next() - 0.5) * 0.3)
+                this.genomes[base + 5] = gene?.postureReflexGain ?? (neutralController ? 0 : (this.rng.next() - 0.5) * 0.3)
             }
         }
     }
@@ -407,6 +552,21 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
         for (let creature = 0; creature < this.populationSize; creature++) {
             this.alive[creature] = 1
             this.reachedTarget[creature] = 0
+            this.targetReachedStep[creature] = -1
+            this.stanceSlip[creature] = 0
+            this.actuatorWork[creature] = 0
+            this.evaluatedSteps[creature] = 0
+            this.survivalSteps[creature] = 0
+            this.protectedClearSteps[creature] = 0
+            this.coreHeightSum[creature] = 0
+            this.airborneSteps[creature] = 0
+            this.pairedOpposedSteps[creature] = 0
+            this.pairedSamples[creature] = 0
+            this.landingImpactSq[creature] = 0
+            this.landingCount[creature] = 0
+            this.verticalJerkSq[creature] = 0
+            this.previousCoreVelocity[creature] = 0
+            this.sustainedProgressSum[creature] = 0
             let totalMass = 0
             let weightedX = 0
             let weightedY = 0
@@ -428,15 +588,28 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
             this.maxDistance[creature] = this.currentX[creature]
             const headY = this.y[particleBase + this.topology.headIndex]
             this.minHeadY[creature] = headY
+            let coreY = 0
+            for (const particle of this.topology.anatomy.coreIndices) coreY += this.y[particleBase + particle]
+            this.previousCoreY[creature] = coreY / Math.max(1, this.topology.anatomy.coreIndices.length)
             for (let muscle = 0; muscle < muscleCount; muscle++) {
                 const oscillatorIndex = creature * muscleCount + muscle
-                const genomeIndex = oscillatorIndex * 3
+                const genomeIndex = oscillatorIndex * GENE_STRIDE
                 const phase = this.genomes[genomeIndex + 2]
                 const step = TWO_PI * this.genomes[genomeIndex + 1] * FIXED_TIMESTEP
                 this.oscillatorSin[oscillatorIndex] = Math.sin(phase)
                 this.oscillatorCos[oscillatorIndex] = Math.cos(phase)
                 this.oscillatorStepSin[oscillatorIndex] = Math.sin(step)
                 this.oscillatorStepCos[oscillatorIndex] = Math.cos(step)
+            }
+            const groupBase = creature * this.topology.anatomy.contactGroups.length
+            for (let group = 0; group < this.topology.anatomy.contactGroups.length; group++) {
+                const index = groupBase + group
+                this.stanceSteps[index] = 0
+                this.strikeCounts[index] = 0
+                this.intervalMeans[index] = 0
+                this.intervalM2[index] = 0
+                this.lastStrikeStep[index] = -1
+                this.groupWasGrounded[index] = 0
             }
         }
     }
@@ -449,9 +622,14 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
         const targetY = 500
 
         for (let creature = 0; creature < this.populationSize; creature++) {
+            if (stepNumber >= WARMUP_STEPS) this.evaluatedSteps[creature]++
             if (!this.alive[creature]) continue
+            if (stepNumber >= WARMUP_STEPS) this.survivalSteps[creature]++
             const particleBase = creature * particleCount
             const muscleBase = creature * muscleCount
+            const groupCount = this.topology.anatomy.contactGroups.length
+            const groupBase = creature * groupCount
+            for (let group = 0; group < groupCount; group++) this.currentGroupGrounded[groupBase + group] = 0
 
             for (let particle = 0; particle < particleCount; particle++) {
                 if (this.topology.locked[particle]) continue
@@ -477,10 +655,28 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
                     const distance = Math.sqrt(dx * dx + dy * dy)
                     if (distance === 0) continue
                     const muscle = this.topology.constraintMuscle[constraint]
-                    const targetLength = muscle >= 0
-                        ? this.topology.constraintLength[constraint]
-                            * (1 + this.genomes[(muscleBase + muscle) * 3] * this.oscillatorSin[muscleBase + muscle])
-                        : this.topology.constraintLength[constraint]
+                    let targetLength = this.topology.constraintLength[constraint]
+                    if (muscle >= 0) {
+                        const genome = (muscleBase + muscle) * GENE_STRIDE
+                        const group = this.topology.anatomy.muscleGroup[muscle]
+                        const grounded = group >= 0 && this.groupWasGrounded[groupBase + group] ? 1 : -0.25
+                        const currentCoreHeight = 600 - this.previousCoreY[creature]
+                        const postureError = Math.max(-1, Math.min(1,
+                            (this.topology.anatomy.baselineCoreHeight - currentCoreHeight) / this.topology.anatomy.bodyScale,
+                        ))
+                        const activation = Math.max(-1.25, Math.min(1.25,
+                            this.oscillatorSin[muscleBase + muscle]
+                            + this.genomes[genome + 4] * grounded
+                            + this.genomes[genome + 5] * postureError,
+                        ))
+                        targetLength *= 1 + this.genomes[genome] * activation
+                        if (iteration === 0 && stepNumber >= WARMUP_STEPS) {
+                            const commandVelocity = Math.abs(this.genomes[genome] * this.genomes[genome + 1]
+                                * this.oscillatorCos[muscleBase + muscle])
+                            this.actuatorWork[creature] += Math.abs(distance - targetLength)
+                                * commandVelocity * this.topology.constraintStiffness[constraint]
+                        }
+                    }
                     const difference = distance - targetLength
                     if (Math.abs(difference) < 0.01) continue
                     const scale = (difference * this.topology.constraintStiffness[constraint]) / distance
@@ -510,6 +706,16 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
                 if (this.y[index] > maxY) {
                     const velocityX = this.x[index] - this.oldX[index]
                     const velocityY = this.y[index] - this.oldY[index]
+                    const group = this.topology.anatomy.particleGroup[particle]
+                    if (stepNumber >= WARMUP_STEPS && group >= 0) {
+                        const groupIndex = groupBase + group
+                        if (!this.groupWasGrounded[groupIndex] && !this.currentGroupGrounded[groupIndex]) {
+                            this.landingImpactSq[creature] += velocityY * velocityY
+                            this.landingCount[creature]++
+                        }
+                        this.currentGroupGrounded[groupIndex] = 1
+                        this.stanceSlip[creature] += Math.abs(velocityX)
+                    }
                     this.y[index] = maxY
                     this.oldY[index] = maxY + velocityY * GROUND_RESTITUTION
                     this.oldX[index] = this.x[index] - velocityX * GROUND_FRICTION
@@ -525,6 +731,7 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
                     && this.x[index] >= targetX && this.x[index] <= targetX + 100
                     && this.y[index] >= targetY && this.y[index] <= targetY + 80) {
                     this.reachedTarget[creature] = 1
+                    this.targetReachedStep[creature] = stepNumber
                 }
             }
 
@@ -539,12 +746,80 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
                 this.maxDistance[creature] = Math.max(this.maxDistance[creature], this.currentX[creature])
             }
 
+            let coreY = 0
+            for (const particle of this.topology.anatomy.coreIndices) coreY += this.y[particleBase + particle]
+            coreY /= Math.max(1, this.topology.anatomy.coreIndices.length)
+            const coreVelocity = coreY - this.previousCoreY[creature]
+            if (stepNumber >= WARMUP_STEPS) {
+                this.coreHeightSum[creature] += Math.max(0, 600 - coreY) / Math.max(1, this.topology.anatomy.baselineCoreHeight)
+                const jerk = coreVelocity - this.previousCoreVelocity[creature]
+                this.verticalJerkSq[creature] += jerk * jerk
+                this.sustainedProgressSum[creature] += Math.max(0, this.currentX[creature] - this.spawnX) / this.topology.anatomy.bodyScale
+                let protectedClear = true
+                for (let particle = 0; particle < particleCount; particle++) {
+                    if (this.topology.anatomy.protectedMask[particle]
+                        && this.y[particleBase + particle] >= 600 - this.topology.radius[particle] - 0.01) {
+                        protectedClear = false
+                        break
+                    }
+                }
+                if (protectedClear) this.protectedClearSteps[creature]++
+                let groundedGroups = 0
+                for (let group = 0; group < groupCount; group++) {
+                    const groupIndex = groupBase + group
+                    const grounded = this.currentGroupGrounded[groupIndex] !== 0
+                    if (grounded) {
+                        groundedGroups++
+                        this.stanceSteps[groupIndex]++
+                    }
+                    if (grounded && !this.groupWasGrounded[groupIndex]) {
+                        const previousStrike = this.lastStrikeStep[groupIndex]
+                        this.strikeCounts[groupIndex]++
+                        if (previousStrike >= 0) {
+                            const interval = stepNumber - previousStrike
+                            const samples = this.strikeCounts[groupIndex] - 1
+                            const delta = interval - this.intervalMeans[groupIndex]
+                            this.intervalMeans[groupIndex] += delta / samples
+                            this.intervalM2[groupIndex] += delta * (interval - this.intervalMeans[groupIndex])
+                        }
+                        this.lastStrikeStep[groupIndex] = stepNumber
+                    }
+                    this.groupWasGrounded[groupIndex] = grounded ? 1 : 0
+                }
+                if (!groundedGroups) this.airborneSteps[creature]++
+                for (let group = 0; group < groupCount; group++) {
+                    const paired = this.topology.anatomy.contactGroups[group].pairedGroup
+                    if (paired <= group) continue
+                    const left = this.currentGroupGrounded[groupBase + group] !== 0
+                    const right = this.currentGroupGrounded[groupBase + paired] !== 0
+                    if (left !== right) this.pairedOpposedSteps[creature]++
+                    else if (left && right) this.pairedOpposedSteps[creature] += 0.25
+                    this.pairedSamples[creature]++
+                }
+            }
+            this.previousCoreVelocity[creature] = coreVelocity
+            this.previousCoreY[creature] = coreY
+
             for (let muscle = 0; muscle < muscleCount; muscle++) {
                 const index = muscleBase + muscle
                 const sin = this.oscillatorSin[index]
                 const cos = this.oscillatorCos[index]
-                this.oscillatorSin[index] = sin * this.oscillatorStepCos[index] + cos * this.oscillatorStepSin[index]
-                this.oscillatorCos[index] = cos * this.oscillatorStepCos[index] - sin * this.oscillatorStepSin[index]
+                let coupled = 0
+                const neighbors = this.topology.anatomy.muscleNeighbors[muscle]
+                for (const neighbor of neighbors) {
+                    coupled += this.oscillatorSin[muscleBase + neighbor] * cos
+                        - this.oscillatorCos[muscleBase + neighbor] * sin
+                }
+                const genome = index * GENE_STRIDE
+                const correction = neighbors.length
+                    ? this.genomes[genome + 3] * coupled / neighbors.length * FIXED_TIMESTEP
+                    : 0
+                const correctionSin = correction
+                const correctionCos = 1 - correction * correction * 0.5
+                const baseSin = sin * this.oscillatorStepCos[index] + cos * this.oscillatorStepSin[index]
+                const baseCos = cos * this.oscillatorStepCos[index] - sin * this.oscillatorStepSin[index]
+                this.oscillatorSin[index] = baseSin * correctionCos + baseCos * correctionSin
+                this.oscillatorCos[index] = baseCos * correctionCos - baseSin * correctionSin
                 if ((stepNumber & 255) === 255) {
                     const magnitude = Math.hypot(this.oscillatorSin[index], this.oscillatorCos[index]) || 1
                     this.oscillatorSin[index] /= magnitude
@@ -555,15 +830,52 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
     }
 
     private evolve(): void {
-        const ranked = Array.from({ length: this.populationSize }, (_, index) => index)
-        ranked.sort((left, right) => this.fitness[right] - this.fitness[left])
+        const ranked = this.paretoOrder.length ? this.paretoOrder : Array.from({ length: this.populationSize }, (_, index) => index)
         const parentCount = Math.max(1, Math.floor(this.populationSize * this.config.parentsTopPercent))
         const next = new Float32Array(this.genomes.length)
         const nextIds = new Uint32Array(this.populationSize)
         const nextParentA = new Uint32Array(this.populationSize)
         const nextParentB = new Uint32Array(this.populationSize)
-        const genomeStride = this.topology.muscleCount * 3
+        const genomeStride = this.topology.muscleCount * GENE_STRIDE
         const eliteCount = Math.min(this.config.elitismCount, this.populationSize)
+        const parentValues = (genome: Genome): Float32Array => {
+            const values = new Float32Array(genomeStride)
+            for (let muscle = 0; muscle < this.topology.muscleCount; muscle++) {
+                const gene = genome.genes.find((candidate) => candidate.muscleId === this.topology.muscleIds[muscle])
+                const base = muscle * GENE_STRIDE
+                values[base] = gene?.amplitude ?? 0.1
+                values[base + 1] = gene?.frequency ?? 1
+                values[base + 2] = gene?.phase ?? 0
+                values[base + 3] = gene?.couplingStrength ?? 0
+                values[base + 4] = gene?.contactReflexGain ?? 0
+                values[base + 5] = gene?.postureReflexGain ?? 0
+            }
+            return values
+        }
+        const chooseParent = (): { values: Float32Array; id: number } => {
+            if (this.config.fitnessVersion === "distance-v1") {
+                const current = this.tournament(ranked, parentCount)
+                return {
+                    values: this.genomes.subarray(current * genomeStride, (current + 1) * genomeStride),
+                    id: this.genomeIds[current],
+                }
+            }
+            const archiveWeight = this.curriculumStage === "discovery" ? 0.4
+                : this.curriculumStage === "coordination" ? 0.3 : 0.25
+            const randomWeight = this.curriculumStage === "refinement" ? 0.05 : 0.1
+            const roll = this.rng.next()
+            if (roll < archiveWeight) {
+                const elite = this.archive.sample(() => this.rng.next())
+                if (elite) return { values: parentValues(elite.genome), id: 0 }
+            }
+            const current = roll >= 1 - randomWeight
+                ? Math.floor(this.rng.next() * this.populationSize)
+                : this.tournament(ranked, parentCount)
+            return {
+                values: this.genomes.subarray(current * genomeStride, (current + 1) * genomeStride),
+                id: this.genomeIds[current],
+            }
+        }
 
         for (let child = 0; child < this.populationSize; child++) {
             if (child < eliteCount) {
@@ -575,27 +887,34 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
                 continue
             }
 
-            const parent1 = this.tournament(ranked, parentCount)
-            const parent2 = this.tournament(ranked, parentCount)
-            const bias = this.fitness[parent1] >= this.fitness[parent2] ? 0.6 : 0.4
+            const parent1 = chooseParent()
+            const parent2 = chooseParent()
             for (let value = 0; value < genomeStride; value++) {
-                const source = this.rng.next() < bias ? parent1 : parent2
-                let result = this.genomes[source * genomeStride + value]
+                const source = this.rng.next() < 0.5 ? parent1.values : parent2.values
+                let result = source[value]
+                if (this.config.fitnessVersion === "distance-v1" && value % GENE_STRIDE >= 3) {
+                    next[child * genomeStride + value] = 0
+                    continue
+                }
                 if (this.rng.next() <= this.config.mutationRate) {
                     const change = (this.rng.next() - 0.5) * 2 * this.config.mutationStrength
-                    result *= 1 + change
-                    const component = value % 3
+                    const component = value % GENE_STRIDE
+                    result = component <= 2 ? result * (1 + change) : result + change
                     result = component === 0
                         ? Math.max(0.05, Math.min(0.8, result))
                         : component === 1
                             ? Math.max(0.1, Math.min(5, result))
-                            : Math.max(0, Math.min(TWO_PI, result))
+                            : component === 2
+                                ? ((result % TWO_PI) + TWO_PI) % TWO_PI
+                                : component === 3
+                                    ? Math.max(0, Math.min(1, result))
+                                    : Math.max(-1, Math.min(1, result))
                 }
                 next[child * genomeStride + value] = result
             }
             nextIds[child] = this.nextGenomeId++
-            nextParentA[child] = this.genomeIds[parent1]
-            nextParentB[child] = this.genomeIds[parent2]
+            nextParentA[child] = parent1.id
+            nextParentB[child] = parent2.id
         }
 
         this.genomes = next
@@ -605,25 +924,28 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
     }
 
     private tournament(ranked: number[], parentCount: number): number {
-        let best = ranked[Math.floor(this.rng.next() * parentCount)]
+        let bestPosition = Math.floor(this.rng.next() * parentCount)
         for (let index = 1; index < 3; index++) {
-            const candidate = ranked[Math.floor(this.rng.next() * parentCount)]
-            if (this.fitness[candidate] > this.fitness[best]) best = candidate
+            const candidatePosition = Math.floor(this.rng.next() * parentCount)
+            if (candidatePosition < bestPosition) bestPosition = candidatePosition
         }
-        return best
+        return ranked[bestPosition]
     }
 
     private copyGenome(creature: number): Float32Array {
-        const stride = this.topology.muscleCount * 3
+        const stride = this.topology.muscleCount * GENE_STRIDE
         return this.genomes.slice(creature * stride, (creature + 1) * stride)
     }
 
     private materializeGenome(values: Float32Array, id: number, generation: number, parentA = 0, parentB = 0): Genome {
         const genes: MuscleGene[] = this.topology.muscleIds.map((muscleId, muscle) => ({
             muscleId,
-            amplitude: values[muscle * 3],
-            frequency: values[muscle * 3 + 1],
-            phase: values[muscle * 3 + 2],
+            amplitude: values[muscle * GENE_STRIDE],
+            frequency: values[muscle * GENE_STRIDE + 1],
+            phase: values[muscle * GENE_STRIDE + 2],
+            couplingStrength: values[muscle * GENE_STRIDE + 3] ?? 0,
+            contactReflexGain: values[muscle * GENE_STRIDE + 4] ?? 0,
+            postureReflexGain: values[muscle * GENE_STRIDE + 5] ?? 0,
         }))
         return {
             id: id ? `genome-${id}` : `genome-best-${generation}`,
@@ -663,5 +985,14 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
             + this.currentY.byteLength + this.maxDistance.byteLength + this.minHeadY.byteLength
             + this.fitness.byteLength + this.oscillatorSin.byteLength + this.oscillatorCos.byteLength
             + this.oscillatorStepSin.byteLength + this.oscillatorStepCos.byteLength
+            + this.stanceSteps.byteLength + this.strikeCounts.byteLength + this.intervalMeans.byteLength
+            + this.intervalM2.byteLength + this.lastStrikeStep.byteLength + this.groupWasGrounded.byteLength
+            + this.currentGroupGrounded.byteLength + this.stanceSlip.byteLength + this.actuatorWork.byteLength
+            + this.evaluatedSteps.byteLength + this.survivalSteps.byteLength + this.protectedClearSteps.byteLength
+            + this.coreHeightSum.byteLength + this.airborneSteps.byteLength + this.pairedOpposedSteps.byteLength
+            + this.pairedSamples.byteLength + this.landingImpactSq.byteLength + this.landingCount.byteLength
+            + this.verticalJerkSq.byteLength + this.previousCoreVelocity.byteLength + this.previousCoreY.byteLength
+            + this.sustainedProgressSum.byteLength + this.targetReachedStep.byteLength
+            + this.archive.export().elites.length * (64 + this.topology.muscleCount * GENE_STRIDE * 4)
     }
 }

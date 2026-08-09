@@ -96,6 +96,8 @@ model TrainingSession {
   population     Json     // Serialized Genome[] (full generation)
   bestGenome     Json     // Best genome of the session (cached for leaderboard)
   bestFitness    Float
+  archive        Json?
+  bestMetrics    Json?
   generation     Int      // Last completed generation number
   reachedTarget  Boolean  @default(false)
   targetDistance Float

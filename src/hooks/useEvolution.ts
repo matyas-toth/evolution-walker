@@ -13,6 +13,9 @@ import type {
     TrainingEngineState,
     TrainingEvent,
     TrainingHubConfig,
+    LocomotionCurriculumStage,
+    LocomotionMetrics,
+    QdArchiveExport,
 } from "@/core/types"
 
 export interface UseEvolutionProps extends TrainingHubConfig {
@@ -20,7 +23,9 @@ export interface UseEvolutionProps extends TrainingHubConfig {
     groundY?: number
     initialPopulation?: Genome[]
     initialGeneration?: number
-    onTargetReached?: (winner: Creature) => void
+    initialArchive?: QdArchiveExport
+    initialBestMetrics?: LocomotionMetrics
+    onTargetReached?: (winner: Creature, metrics: LocomotionMetrics) => void
 }
 
 export type EvolutionPhase = "idle" | "running" | "evaluating" | "evolving" | "paused"
@@ -29,6 +34,9 @@ export interface FitnessDataPoint {
     generation: number
     bestFitness: number
     averageFitness: number
+    taskProgress: number
+    locomotionQuality: number
+    archiveCoverage: number
 }
 
 const EMPTY_DIAGNOSTICS: TrainingDiagnostics = {
@@ -64,6 +72,8 @@ export function useEvolution(props: UseEvolutionProps) {
         groundY = 600,
         initialPopulation,
         initialGeneration,
+        initialArchive,
+        initialBestMetrics,
         onTargetReached,
     } = props
     const clientRef = useRef<TrainingEngineClient | null>(null)
@@ -76,10 +86,14 @@ export function useEvolution(props: UseEvolutionProps) {
     const [creatures, setCreatures] = useState<Creature[]>([])
     const [fitnessHistory, setFitnessHistory] = useState<FitnessDataPoint[]>([])
     const [bestCreatureEver, setBestCreatureEver] = useState<Creature | null>(null)
+    const [bestFitness, setBestFitness] = useState(0)
     const [progress, setProgress] = useState(0)
     const [diagnostics, setDiagnostics] = useState<TrainingDiagnostics>(EMPTY_DIAGNOSTICS)
     const [error, setError] = useState<string | null>(null)
     const [pausePending, setPausePending] = useState(false)
+    const [bestMetrics, setBestMetrics] = useState<LocomotionMetrics | null>(initialBestMetrics ?? null)
+    const [archiveCoverage, setArchiveCoverage] = useState(initialArchive ? initialArchive.elites.length / 960 : 0)
+    const [curriculumStage, setCurriculumStage] = useState<LocomotionCurriculumStage>("discovery")
 
     const engineConfig = useMemo(() => resolveTrainingEngineConfig(props), [
         props.populationSize,
@@ -95,6 +109,9 @@ export function useEvolution(props: UseEvolutionProps) {
         props.seed,
         props.workerCount,
         props.snapshotHz,
+        props.fitnessVersion,
+        props.controllerVersion,
+        props.upgradedFromSessionId,
     ])
 
     const applyRenderSnapshot = useCallback((event: Extract<TrainingEvent, { type: "snapshot" | "ready" | "paused" }>) => {
@@ -135,9 +152,15 @@ export function useEvolution(props: UseEvolutionProps) {
                     generation: event.generation,
                     bestFitness: event.bestFitness,
                     averageFitness: event.averageFitness,
+                    taskProgress: event.bestMetrics.progress,
+                    locomotionQuality: event.bestMetrics.locomotionQuality,
+                    archiveCoverage: event.archiveCoverage * 100,
                 }))
-                setBestCreatureEver((previous) => {
-                    if (previous && (previous.fitness?.total ?? Number.NEGATIVE_INFINITY) >= event.bestFitness) return previous
+                setBestMetrics(event.bestMetrics)
+                setBestFitness((current) => Math.max(current, event.bestFitness))
+                setArchiveCoverage(event.archiveCoverage)
+                setCurriculumStage(event.curriculumStage)
+                setBestCreatureEver(() => {
                     const best = createCreatureFromTopology(topology, event.bestGenome, { x: 100, y: groundY - 30 })
                     best.fitness.total = event.bestFitness
                     return best
@@ -149,9 +172,13 @@ export function useEvolution(props: UseEvolutionProps) {
                 setGeneration(event.snapshot.generation)
                 setProgress(event.snapshot.progress)
                 setDiagnostics(event.snapshot.diagnostics)
+                setBestFitness((current) => Math.max(current, event.snapshot.bestFitness))
+                setBestMetrics(event.metrics)
+                setArchiveCoverage(event.snapshot.archiveCoverage)
+                setCurriculumStage(event.snapshot.curriculumStage)
                 setPausePending(false)
                 const winner = createCreatureFromTopology(topology, event.genome, { x: 100, y: groundY - 30 })
-                callbackRef.current?.(winner)
+                callbackRef.current?.(winner, event.metrics)
                 return
             }
             if (event.type === "backendChanged" || event.type === "sessionExported"
@@ -163,16 +190,20 @@ export function useEvolution(props: UseEvolutionProps) {
                 setGeneration(snapshot.generation)
                 setProgress(snapshot.progress)
                 setDiagnostics(snapshot.diagnostics)
+                setBestFitness((current) => Math.max(current, snapshot.bestFitness))
+                setBestMetrics(snapshot.bestMetrics)
+                setArchiveCoverage(snapshot.archiveCoverage)
+                setCurriculumStage(snapshot.curriculumStage)
                 applyRenderSnapshot(event)
             })
         })
-        client.initialize(topology, engineConfig, initialPopulation, initialGeneration)
+        client.initialize(topology, engineConfig, initialPopulation, initialGeneration, initialArchive, initialBestMetrics)
         return () => {
             unsubscribe()
             client.dispose()
             if (clientRef.current === client) clientRef.current = null
         }
-    }, [applyRenderSnapshot, initialGeneration, initialPopulation, topology])
+    }, [applyRenderSnapshot, initialArchive, initialBestMetrics, initialGeneration, initialPopulation, topology])
 
     useEffect(() => {
         clientRef.current?.updateConfig(engineConfig)
@@ -181,6 +212,9 @@ export function useEvolution(props: UseEvolutionProps) {
     const start = useCallback(() => {
         setError(null)
         setPausePending(false)
+        setBestMetrics(null)
+        setArchiveCoverage(0)
+        setCurriculumStage("discovery")
         setPhase("running")
         clientRef.current?.start()
     }, [])
@@ -198,6 +232,7 @@ export function useEvolution(props: UseEvolutionProps) {
         setCreatures([])
         setFitnessHistory([])
         setBestCreatureEver(null)
+        setBestFitness(0)
         setError(null)
         setPausePending(false)
         renderCreaturesRef.current = []
@@ -222,10 +257,14 @@ export function useEvolution(props: UseEvolutionProps) {
         creatures,
         progress,
         bestCreatureEver,
+        bestFitness,
         fitnessHistory,
         diagnostics,
         error,
         pausePending,
+        bestMetrics,
+        archiveCoverage,
+        curriculumStage,
         start,
         stop,
         reset,

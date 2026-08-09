@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import type { Genome } from "@/core/types/genetics"
 import type { TrainingHubConfig } from "@/core/types/simulation"
+import type { LocomotionMetrics, QdArchiveExport } from "@/core/types"
 
 export interface SaveSessionPayload {
     creatureId: string
@@ -15,6 +16,8 @@ export interface SaveSessionPayload {
     /** Best genome of the run (cached for leaderboard reads) */
     bestGenome: Genome
     bestFitness: number
+    archive?: QdArchiveExport
+    bestMetrics?: LocomotionMetrics
     generation: number
     reachedTarget: boolean
 }
@@ -39,6 +42,8 @@ export async function saveTrainingSession(payload: SaveSessionPayload) {
             population: payload.population as any,
             bestGenome: payload.bestGenome as any,
             bestFitness: payload.bestFitness,
+            archive: payload.archive as any,
+            bestMetrics: payload.bestMetrics as any,
             generation: payload.generation,
             reachedTarget: payload.reachedTarget,
             targetDistance: payload.config.targetDistance,
@@ -71,6 +76,8 @@ export async function getTrainingSessions(creatureId: string) {
             config: true,
             bestGenome: true,
             population: true,
+            archive: true,
+            bestMetrics: true,
         },
     })
 }

@@ -4,6 +4,36 @@ export type TrainingBackend = "auto" | "webgpu" | "wasm-simd" | "wasm-scalar" | 
 export type ActiveTrainingBackend = Exclude<TrainingBackend, "auto">
 export type TrainingWorkerCount = "auto" | number
 export type TrainingEnginePhase = "idle" | "running" | "evaluating" | "evolving" | "paused"
+export type LocomotionCurriculumStage = "discovery" | "coordination" | "refinement"
+
+export interface LocomotionMetrics {
+    progress: number
+    sustainedProgress: number
+    locomotionQuality: number
+    contactUtilization: number
+    periodicity: number
+    coordination: number
+    traction: number
+    carriage: number
+    smoothness: number
+    energyEfficiency: number
+    transportCost: number
+    airborneRatio: number
+    survivalRatio: number
+    descriptor: [number, number, number]
+}
+
+export interface QdArchiveElite {
+    cell: number
+    descriptor: [number, number, number]
+    metrics: LocomotionMetrics
+    genome: Genome
+}
+
+export interface QdArchiveExport {
+    dimensions: [number, number, number]
+    elites: QdArchiveElite[]
+}
 
 export interface TrainingStageTimings {
     initializeMs: number
@@ -51,6 +81,9 @@ export interface TrainingSnapshot {
     bestFitness: number
     averageFitness: number
     diagnostics: TrainingDiagnostics
+    bestMetrics: LocomotionMetrics
+    archiveCoverage: number
+    curriculumStage: LocomotionCurriculumStage
     render?: PackedRenderSnapshot
 }
 
@@ -59,6 +92,8 @@ export interface TrainingEngineState {
     bestGenome: Genome | null
     bestFitness: number
     generation: number
+    archive: QdArchiveExport
+    bestMetrics: LocomotionMetrics
 }
 
 export interface TrainingEngineConfig extends TrainingHubConfig {
@@ -75,6 +110,8 @@ export type TrainingCommand =
         config: TrainingEngineConfig
         initialPopulation?: Genome[]
         initialGeneration?: number
+        initialArchive?: QdArchiveExport
+        initialBestMetrics?: LocomotionMetrics
     }
     | { type: "start" }
     | { type: "pause" }
@@ -87,8 +124,8 @@ export type TrainingCommand =
 export type TrainingEvent =
     | { type: "ready"; snapshot: TrainingSnapshot }
     | { type: "snapshot"; snapshot: TrainingSnapshot }
-    | { type: "generation"; generation: number; bestFitness: number; averageFitness: number; bestGenome: Genome }
-    | { type: "targetReached"; genome: Genome; generation: number; snapshot: TrainingSnapshot }
+    | { type: "generation"; generation: number; bestFitness: number; averageFitness: number; bestGenome: Genome; bestMetrics: LocomotionMetrics; archiveCoverage: number; curriculumStage: LocomotionCurriculumStage }
+    | { type: "targetReached"; genome: Genome; generation: number; snapshot: TrainingSnapshot; metrics: LocomotionMetrics }
     | { type: "replayReady"; requestId: number; replay: PackedTrainingReplay }
     | { type: "replayFailed"; requestId: number; message: string }
     | { type: "sessionExported"; requestId: number; state: TrainingEngineState }
@@ -111,5 +148,8 @@ export function resolveTrainingEngineConfig(config: TrainingHubConfig): Training
         seed: config.seed ?? 0x6d2b79f5,
         workerCount: config.workerCount ?? "auto",
         snapshotHz: Math.max(1, Math.min(30, config.snapshotHz ?? 5)),
+        fitnessVersion: config.fitnessVersion ?? "adaptive-locomotion-v2",
+        controllerVersion: 2,
+        upgradedFromSessionId: config.upgradedFromSessionId,
     }
 }

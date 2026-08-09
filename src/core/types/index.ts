@@ -36,6 +36,8 @@ export type {
   TopologyParticle,
   TopologyConstraint,
   TopologyMuscle,
+  LocomotionAnatomy,
+  LocomotionContactGroup,
 } from './topology';
 
 export type {
@@ -43,6 +45,10 @@ export type {
   ActiveTrainingBackend,
   TrainingWorkerCount,
   TrainingEnginePhase,
+  LocomotionCurriculumStage,
+  LocomotionMetrics,
+  QdArchiveElite,
+  QdArchiveExport,
   TrainingStageTimings,
   TrainingDiagnostics,
   PackedRenderSnapshot,

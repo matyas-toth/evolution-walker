@@ -1,5 +1,7 @@
 import type {
     Genome,
+    LocomotionCurriculumStage,
+    LocomotionMetrics,
     MuscleGene,
     PackedTrainingReplay,
     Topology,
@@ -10,6 +12,7 @@ import type {
 } from "@/core/types"
 import type { EvaluatedGeneration, TrainingBackendEngine } from "./engineBackend"
 import { getTrainingTargetZone, TRAINING_FRAME_RATE, TRAINING_GROUND_Y } from "./world"
+import { BehaviorArchive, emptyLocomotionMetrics } from "./locomotion"
 
 const GPU_MAP_READ = 0x0001
 const GPU_COPY_SRC = 0x0004
@@ -301,8 +304,14 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
     private bestGenomeValues: Float32Array | null = null
     private lastEvaluation: EvaluatedGeneration | null = null
     private deviceLost = false
+    private bestMetrics: LocomotionMetrics = emptyLocomotionMetrics()
+    private curriculumStage: LocomotionCurriculumStage = "discovery"
+    private readonly archive: BehaviorArchive
 
-    static async create(topology: Topology, config: TrainingEngineConfig, initialPopulation?: Genome[], initialGeneration = 1, replayMode = false): Promise<WebGpuTrainingEngine> {
+    static async create(topology: Topology, config: TrainingEngineConfig, initialPopulation?: Genome[], initialGeneration = 1, replayMode = false, initialArchive?: TrainingEngineState["archive"], initialBestMetrics?: LocomotionMetrics): Promise<WebGpuTrainingEngine> {
+        if (config.fitnessVersion === "adaptive-locomotion-v2") {
+            throw new Error("WebGPU adaptive-locomotion-v2 is unavailable on this shader build; preserving objective semantics with WASM SIMD")
+        }
         const gpu = (navigator as WorkerGpuNavigator).gpu
         if (!gpu) throw new Error("WebGPU is not exposed in this worker")
         const adapter = await gpu.requestAdapter({ powerPreference: "high-performance" })
@@ -320,10 +329,10 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
             layout: "auto",
             compute: { module, entryPoint: "train" },
         })
-        return new WebGpuTrainingEngine(device, pipeline, topology, config, initialPopulation, initialGeneration, replayMode)
+        return new WebGpuTrainingEngine(device, pipeline, topology, config, initialPopulation, initialGeneration, replayMode, initialArchive, initialBestMetrics)
     }
 
-    private constructor(device: GpuDeviceHandle, pipeline: { getBindGroupLayout(index: number): unknown }, topology: Topology, config: TrainingEngineConfig, initialPopulation: Genome[] | undefined, initialGeneration: number, replayMode: boolean) {
+    private constructor(device: GpuDeviceHandle, pipeline: { getBindGroupLayout(index: number): unknown }, topology: Topology, config: TrainingEngineConfig, initialPopulation: Genome[] | undefined, initialGeneration: number, replayMode: boolean, initialArchive?: TrainingEngineState["archive"], initialBestMetrics?: LocomotionMetrics) {
         const startedAt = performance.now()
         this.device = device
         this.pipeline = pipeline
@@ -331,6 +340,8 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
         this.config = config
         this.replayMode = replayMode
         this.generation = initialGeneration
+        this.archive = new BehaviorArchive(initialArchive)
+        this.bestMetrics = initialBestMetrics ?? emptyLocomotionMetrics()
         this.muscleIds = topology.muscles.map((muscle) => muscle.id)
         this.random = new SeededRandom(config.seed)
         this.genomes = this.createGenomes(initialPopulation)
@@ -446,6 +457,10 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
             targetIndex,
             bestGenome: this.materializeGenome(bestValues, `genome-${evaluatedGeneration}-best`, evaluatedGeneration),
             targetGenome: targetValues ? this.materializeGenome(targetValues, `genome-${evaluatedGeneration}-target`, evaluatedGeneration) : null,
+            bestMetrics: this.bestMetrics,
+            targetMetrics: targetValues ? this.bestMetrics : null,
+            archiveCoverage: this.archive.coverage(),
+            curriculumStage: this.curriculumStage,
         }
         return this.lastEvaluation
     }
@@ -456,6 +471,9 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
             phase, generation: this.generation, progress: Math.round(this.getProgress()),
             bestFitness: Number.isFinite(this.bestFitness) ? this.bestFitness : 0,
             averageFitness: this.lastEvaluation?.averageFitness ?? 0,
+            bestMetrics: this.lastEvaluation?.bestMetrics ?? this.bestMetrics,
+            archiveCoverage: this.archive.coverage(),
+            curriculumStage: this.curriculumStage,
             diagnostics: {
                 backend: "webgpu", workerCount: 1,
                 generationsPerSecond: averageDuration ? 1000 / averageDuration : 0,
@@ -475,6 +493,8 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
         return {
             population: Array.from({ length: this.config.populationSize }, (_, creature) => this.materializeGenome(this.genomes.slice(creature * stride, (creature + 1) * stride), `genome-${this.generation}-${creature}`, this.generation)),
             bestGenome: this.getBestGenome(), bestFitness: Number.isFinite(this.bestFitness) ? this.bestFitness : 0, generation: this.generation,
+            archive: this.archive.export(),
+            bestMetrics: this.bestMetrics,
         }
     }
 

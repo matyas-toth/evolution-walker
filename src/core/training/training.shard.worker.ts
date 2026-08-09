@@ -1,10 +1,10 @@
 /// <reference lib="webworker" />
 
 import { RustWasmTrainingEngine } from "./RustWasmTrainingEngine"
-import type { ActiveTrainingBackend, Genome, Topology, TrainingEngineConfig } from "@/core/types"
+import type { ActiveTrainingBackend, Genome, LocomotionMetrics, QdArchiveExport, Topology, TrainingEngineConfig } from "@/core/types"
 
 type ShardCommand =
-    | { id: number; type: "init"; topology: Topology; config: TrainingEngineConfig; population?: Genome[]; generation: number; backend: ActiveTrainingBackend }
+    | { id: number; type: "init"; topology: Topology; config: TrainingEngineConfig; population?: Genome[]; generation: number; backend: ActiveTrainingBackend; initialArchive?: QdArchiveExport; initialBestMetrics?: LocomotionMetrics }
     | { id: number; type: "run"; maxSteps: number; budgetMs: number; includeRender: boolean }
     | { id: number; type: "finish" }
     | { id: number; type: "update"; config: TrainingEngineConfig }
@@ -19,7 +19,7 @@ scope.onmessage = async (message: MessageEvent<ShardCommand>) => {
     try {
         switch (command.type) {
             case "init":
-                engine = await RustWasmTrainingEngine.create(command.topology, command.config, command.population, command.generation, command.backend)
+                engine = await RustWasmTrainingEngine.create(command.topology, command.config, command.population, command.generation, command.backend, command.initialArchive, command.initialBestMetrics)
                 scope.postMessage({ id: command.id, ok: true })
                 break
             case "run": {

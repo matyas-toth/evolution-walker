@@ -50,6 +50,10 @@ export function validateTopology(topology: Topology): ValidationResult {
   // Validate muscle particle references
   const muscleErrors = validateMuscleReferences(topology);
   errors.push(...muscleErrors);
+
+  const anatomyResult = validateLocomotionAnatomy(topology);
+  errors.push(...anatomyResult.errors);
+  warnings.push(...anatomyResult.warnings);
   
   // Check if topology is connected
   if (!isConnected(topology)) {
@@ -87,6 +91,39 @@ export function validateTopology(topology: Topology): ValidationResult {
     errors,
     warnings,
   };
+}
+
+/** Validates optional functional anatomy without requiring it for older creatures. */
+export function validateLocomotionAnatomy(topology: Topology): ValidationResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const anatomy = topology.locomotion;
+  if (!anatomy) return { isValid: true, errors, warnings };
+  const particleIds = new Set(topology.particles.map((particle) => particle.id));
+  const checkReferences = (label: string, ids: string[] | undefined) => {
+    for (const id of ids ?? []) if (!particleIds.has(id)) errors.push(`${label} references non-existent particle: ${id}`);
+  };
+  checkReferences('Locomotion core', anatomy.coreParticleIds);
+  checkReferences('Locomotion protected set', anatomy.protectedParticleIds);
+  const groupIds = new Set<string>();
+  const ownership = new Map<string, string>();
+  for (const group of anatomy.contactGroups ?? []) {
+    if (!group.id.trim()) errors.push('Locomotion contact group must have a non-empty id');
+    if (groupIds.has(group.id)) errors.push(`Duplicate locomotion contact group: ${group.id}`);
+    groupIds.add(group.id);
+    if (!group.particleIds.length) warnings.push(`Locomotion contact group ${group.id} has no particles`);
+    checkReferences(`Locomotion contact group ${group.id}`, group.particleIds);
+    for (const particleId of group.particleIds) {
+      const existing = ownership.get(particleId);
+      if (existing) errors.push(`Particle ${particleId} belongs to both ${existing} and ${group.id}`);
+      ownership.set(particleId, group.id);
+    }
+  }
+  for (const group of anatomy.contactGroups ?? []) {
+    if (group.pairedWith && !groupIds.has(group.pairedWith)) errors.push(`Contact group ${group.id} pairs with missing group ${group.pairedWith}`);
+    if (group.pairedWith === group.id) errors.push(`Contact group ${group.id} cannot pair with itself`);
+  }
+  return { isValid: errors.length === 0, errors, warnings };
 }
 
 /**

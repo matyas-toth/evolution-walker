@@ -5,9 +5,9 @@
  */
 
 import { useReducer, useCallback, useRef } from "react"
-import type { Topology, TopologyParticle, TopologyConstraint, TopologyMuscle } from "@/core/types"
+import type { LocomotionAnatomy, Topology, TopologyParticle, TopologyConstraint, TopologyMuscle } from "@/core/types"
 
-export type EditorTool = "select" | "particle" | "constraint" | "muscle" | "delete"
+export type EditorTool = "select" | "anatomy" | "particle" | "constraint" | "muscle" | "delete"
 export type ElementType = "particle" | "constraint" | "muscle"
 export interface SelectedElement { type: ElementType; id: string }
 
@@ -19,6 +19,7 @@ interface EditorState {
     history: Topology[]
     historyIndex: number
     isPreviewMode: boolean
+    anatomySelection: string[]
 }
 
 type EditorAction =
@@ -31,6 +32,8 @@ type EditorAction =
     | { type: "UPDATE_PARTICLE"; id: string; updates: Partial<TopologyParticle> }
     | { type: "UPDATE_CONSTRAINT"; id: string; updates: Partial<TopologyConstraint> }
     | { type: "UPDATE_MUSCLE"; id: string; updates: Partial<TopologyMuscle> }
+    | { type: "UPDATE_LOCOMOTION"; locomotion?: LocomotionAnatomy }
+    | { type: "TOGGLE_ANATOMY_PARTICLE"; id: string }
     | { type: "DELETE_ELEMENT"; elementType: ElementType; id: string }
     | { type: "MOVE_PARTICLE"; id: string; x: number; y: number }
     | { type: "SET_TOPOLOGY"; topology: Topology }
@@ -52,13 +55,26 @@ function editorReducer(state: EditorState, action: EditorAction): EditorState {
 
     switch (action.type) {
         case "SET_TOOL":
-            return { ...state, tool: action.tool, pendingConnection: null, selected: null }
+            return { ...state, tool: action.tool, pendingConnection: null, selected: null, anatomySelection: action.tool === "anatomy" ? state.anatomySelection : [] }
 
         case "SELECT":
             return { ...state, selected: action.element }
 
         case "SET_PENDING":
             return { ...state, pendingConnection: action.particleId }
+
+        case "TOGGLE_ANATOMY_PARTICLE":
+            return {
+                ...state,
+                anatomySelection: state.anatomySelection.includes(action.id)
+                    ? state.anatomySelection.filter((id) => id !== action.id)
+                    : [...state.anatomySelection, action.id],
+            }
+
+        case "UPDATE_LOCOMOTION": {
+            const s = pushHistory(state)
+            return { ...s, topology: { ...s.topology, locomotion: action.locomotion } }
+        }
 
         case "ADD_PARTICLE": {
             const s = pushHistory(state)
@@ -154,6 +170,15 @@ function editorReducer(state: EditorState, action: EditorAction): EditorState {
                 topo.particles = topo.particles.filter((p) => p.id !== action.id)
                 topo.constraints = topo.constraints.filter((c) => c.p1Id !== action.id && c.p2Id !== action.id)
                 topo.muscles = topo.muscles.filter((m) => m.p1Id !== action.id && m.p2Id !== action.id)
+                if (topo.locomotion) {
+                    topo.locomotion = {
+                        coreParticleIds: topo.locomotion.coreParticleIds?.filter((id) => id !== action.id),
+                        protectedParticleIds: topo.locomotion.protectedParticleIds?.filter((id) => id !== action.id),
+                        contactGroups: topo.locomotion.contactGroups
+                            ?.map((group) => ({ ...group, particleIds: group.particleIds.filter((id) => id !== action.id) }))
+                            .filter((group) => group.particleIds.length > 0),
+                    }
+                }
                 
                 if (target?.isHead && topo.particles.length > 0) {
                     topo.particles[0] = { ...topo.particles[0], isHead: true }
@@ -221,6 +246,7 @@ export function useEditorState(initial: Topology) {
         history: initialHistory,
         historyIndex: 0,
         isPreviewMode: false,
+        anatomySelection: [],
     })
 
     const counterRef = useRef({ particle: initial.particles.length, constraint: initial.constraints.length, muscle: initial.muscles.length })

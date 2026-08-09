@@ -1,6 +1,8 @@
 import type {
     ActiveTrainingBackend,
     Genome,
+    LocomotionCurriculumStage,
+    LocomotionMetrics,
     MuscleGene,
     PackedTrainingReplay,
     Topology,
@@ -11,6 +13,7 @@ import type {
 } from "@/core/types"
 import type { EvaluatedGeneration, TrainingBackendEngine } from "./engineBackend"
 import { captureReplayFrames } from "./replayCapture"
+import { BehaviorArchive, compileFunctionalAnatomy, emptyLocomotionMetrics } from "./locomotion"
 
 interface TrainingWasmExports {
     memory: WebAssembly.Memory
@@ -46,6 +49,16 @@ interface TrainingWasmExports {
     training_best_ever_len(): number
     training_summary_ptr(): number
     training_summary_len(): number
+    training_last_best_metrics_ptr(): number
+    training_last_best_metrics_len(): number
+    training_last_target_metrics_ptr(): number
+    training_last_target_metrics_len(): number
+    training_archive_cells_ptr(): number
+    training_archive_cells_len(): number
+    training_archive_metrics_ptr(): number
+    training_archive_metrics_len(): number
+    training_archive_genomes_ptr(): number
+    training_archive_genomes_len(): number
 }
 
 /** Produces deterministic initial values without allocating genome objects in the worker. */
@@ -80,6 +93,9 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
     private generationStartedAt = performance.now()
     private lastSimulationMs = 0
     private bestFitness = Number.NEGATIVE_INFINITY
+    private bestMetrics: LocomotionMetrics = emptyLocomotionMetrics()
+    private curriculumStage: LocomotionCurriculumStage = "discovery"
+    private archive: BehaviorArchive
 
     static async create(
         topology: Topology,
@@ -87,6 +103,8 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
         initialPopulation?: Genome[],
         initialGeneration = 1,
         backend: ActiveTrainingBackend = "wasm-scalar",
+        initialArchive?: TrainingEngineState["archive"],
+        initialBestMetrics?: LocomotionMetrics,
     ): Promise<RustWasmTrainingEngine> {
         const asset = backend === "wasm-simd" ? "/training-engine-simd.wasm" : "/training-engine-scalar.wasm"
         const response = await fetch(new URL(asset, self.location.origin))
@@ -99,6 +117,8 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
             initialPopulation,
             initialGeneration,
             backend,
+            initialArchive,
+            initialBestMetrics,
         )
     }
 
@@ -109,12 +129,16 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
         initialPopulation: Genome[] | undefined,
         initialGeneration: number,
         backend: ActiveTrainingBackend,
+        initialArchive?: TrainingEngineState["archive"],
+        initialBestMetrics?: LocomotionMetrics,
     ) {
         const startedAt = performance.now()
         this.exports = exports
         this.topology = topology
         this.config = config
         this.backend = backend
+        this.archive = new BehaviorArchive(initialArchive)
+        this.bestMetrics = initialBestMetrics ?? emptyLocomotionMetrics()
         this.muscleIds = topology.muscles.map((muscle) => muscle.id)
         this.populationSize = config.populationSize
         this.particleCount = topology.particles.length
@@ -170,6 +194,13 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
         const startedAt = performance.now()
         this.exports.training_finish_generation()
         const summary = this.readSlice(this.exports.training_summary_ptr(), this.exports.training_summary_len())
+        const generation = summary[0]
+        this.bestMetrics = this.materializeMetrics(this.readSlice(this.exports.training_last_best_metrics_ptr(), this.exports.training_last_best_metrics_len()))
+        const targetMetrics = summary[4] >= 0
+            ? this.materializeMetrics(this.readSlice(this.exports.training_last_target_metrics_ptr(), this.exports.training_last_target_metrics_len()))
+            : null
+        this.archive = new BehaviorArchive(this.readArchive(generation))
+        this.curriculumStage = summary[8] === 2 ? "refinement" : summary[8] === 1 ? "coordination" : "discovery"
         const transitionMs = performance.now() - startedAt
         this.timings.fitnessMs = transitionMs
         this.timings.evolutionMs = 0
@@ -180,7 +211,6 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
         this.generationStartedAt = performance.now()
         this.lastSimulationMs = 0
         this.bestFitness = Math.max(this.bestFitness, summary[1])
-        const generation = summary[0]
         return {
             generation,
             bestFitness: summary[1],
@@ -199,6 +229,10 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
                     generation,
                 )
                 : null,
+            bestMetrics: this.bestMetrics,
+            targetMetrics,
+            archiveCoverage: this.archive.coverage(),
+            curriculumStage: this.curriculumStage,
         }
     }
 
@@ -212,6 +246,9 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
             progress: Math.round(this.getProgress()),
             bestFitness: Number.isFinite(this.bestFitness) ? this.bestFitness : 0,
             averageFitness: 0,
+            bestMetrics: this.bestMetrics,
+            archiveCoverage: this.archive.coverage(),
+            curriculumStage: this.curriculumStage,
             diagnostics: {
                 backend: this.backend,
                 workerCount: 1,
@@ -231,7 +268,7 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
 
     exportState(): TrainingEngineState {
         const values = this.readSlice(this.exports.training_genomes_ptr(), this.exports.training_genomes_len())
-        const stride = this.muscleIds.length * 3
+        const stride = this.muscleIds.length * 6
         const generation = this.getGeneration()
         const population = Array.from({ length: this.populationSize }, (_, creature) =>
             this.materializeGenome(
@@ -245,6 +282,8 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
             bestGenome: this.getBestGenome(),
             bestFitness: Number.isFinite(this.bestFitness) ? this.bestFitness : 0,
             generation,
+            archive: this.archive.export(),
+            bestMetrics: this.bestMetrics,
         }
     }
 
@@ -269,9 +308,13 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
     private createInput(initialPopulation: Genome[] | undefined, initialGeneration: number): Float32Array {
         const particleIds = new Map(this.topology.particles.map((particle, index) => [particle.id, index]))
         const constraintCount = this.topology.constraints.length + this.topology.muscles.length
-        const genomeLength = this.populationSize * this.muscleIds.length * 3
+        const anatomy = compileFunctionalAnatomy(this.topology)
+        const genomeStride = this.muscleIds.length * 6
+        const genomeLength = this.populationSize * genomeStride
+        const archive = this.archive.export().elites
+        const archiveStride = 1 + 16 + genomeStride
         const values = new Float32Array(
-            14 + this.particleCount * 6 + constraintCount * 5 + genomeLength,
+            17 + this.particleCount * 10 + constraintCount * 5 + anatomy.contactGroups.length + genomeLength + archive.length * archiveStride,
         )
         values.set([
             this.populationSize,
@@ -288,9 +331,13 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
             this.config.targetDistance,
             600,
             570,
+            anatomy.contactGroups.length,
+            30,
+            archive.length,
         ])
-        let cursor = 14
-        for (const particle of this.topology.particles) {
+        let cursor = 17
+        for (let particleIndex = 0; particleIndex < this.topology.particles.length; particleIndex++) {
+            const particle = this.topology.particles[particleIndex]
             values.set([
                 particle.initialPos.x,
                 particle.initialPos.y,
@@ -298,8 +345,12 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
                 particle.radius,
                 particle.isLocked ? 1 : 0,
                 particle.isHead || particle.id === "head" ? 1 : 0,
+                anatomy.coreIndices.includes(particleIndex) ? 1 : 0,
+                anatomy.protectedMask[particleIndex],
+                anatomy.particleGroup[particleIndex],
+                anatomy.branchGroup[particleIndex],
             ], cursor)
-            cursor += 6
+            cursor += 10
         }
         for (const constraint of this.topology.constraints) {
             values.set([
@@ -321,6 +372,7 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
             ], cursor)
             cursor += 5
         })
+        for (const group of anatomy.contactGroups) values[cursor++] = group.pairedGroup
         const random = new SeededRandom(this.config.seed)
         for (let creature = 0; creature < this.populationSize; creature++) {
             for (let muscle = 0; muscle < this.muscleIds.length; muscle++) {
@@ -328,6 +380,19 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
                 values[cursor++] = gene?.amplitude ?? random.next() * 0.5 + 0.1
                 values[cursor++] = gene?.frequency ?? random.next() * 2 + 0.1
                 values[cursor++] = gene?.phase ?? random.next() * Math.PI * 2
+                values[cursor++] = gene?.couplingStrength ?? (initialPopulation ? 0 : random.next() * 0.25)
+                values[cursor++] = gene?.contactReflexGain ?? (initialPopulation ? 0 : (random.next() - 0.5) * 0.3)
+                values[cursor++] = gene?.postureReflexGain ?? (initialPopulation ? 0 : (random.next() - 0.5) * 0.3)
+            }
+        }
+        for (const elite of archive) {
+            values[cursor++] = elite.cell
+            const metrics = this.packMetrics(elite.metrics)
+            values.set(metrics, cursor); cursor += metrics.length
+            for (const muscleId of this.muscleIds) {
+                const gene = elite.genome.genes.find((candidate) => candidate.muscleId === muscleId)
+                values.set([gene?.amplitude ?? 0.2, gene?.frequency ?? 1, gene?.phase ?? 0, gene?.couplingStrength ?? 0, gene?.contactReflexGain ?? 0, gene?.postureReflexGain ?? 0], cursor)
+                cursor += 6
             }
         }
         return values
@@ -341,11 +406,50 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
     private materializeGenome(values: Float32Array, id: string, generation: number): Genome {
         const genes: MuscleGene[] = this.muscleIds.map((muscleId, muscle) => ({
             muscleId,
-            amplitude: values[muscle * 3],
-            frequency: values[muscle * 3 + 1],
-            phase: values[muscle * 3 + 2],
+            amplitude: values[muscle * 6],
+            frequency: values[muscle * 6 + 1],
+            phase: values[muscle * 6 + 2],
+            couplingStrength: values[muscle * 6 + 3],
+            contactReflexGain: values[muscle * 6 + 4],
+            postureReflexGain: values[muscle * 6 + 5],
         }))
         return { id, genes, generation, createdAt: Date.now() }
+    }
+
+    private materializeMetrics(values: Float32Array): LocomotionMetrics {
+        if (values.length < 16) return emptyLocomotionMetrics()
+        return {
+            progress: values[0], sustainedProgress: values[1], locomotionQuality: values[2],
+            contactUtilization: values[3], periodicity: values[4], coordination: values[5],
+            traction: values[6], carriage: values[7], smoothness: values[8], energyEfficiency: values[9],
+            transportCost: values[10], airborneRatio: values[11], survivalRatio: values[12],
+            descriptor: [values[13], values[14], values[15]],
+        }
+    }
+
+    private packMetrics(metrics: LocomotionMetrics): Float32Array {
+        return Float32Array.from([
+            metrics.progress, metrics.sustainedProgress, metrics.locomotionQuality, metrics.contactUtilization,
+            metrics.periodicity, metrics.coordination, metrics.traction, metrics.carriage, metrics.smoothness,
+            metrics.energyEfficiency, metrics.transportCost, metrics.airborneRatio, metrics.survivalRatio,
+            ...metrics.descriptor,
+        ])
+    }
+
+    private readArchive(generation: number): TrainingEngineState["archive"] {
+        const cells = this.readSlice(this.exports.training_archive_cells_ptr(), this.exports.training_archive_cells_len())
+        const metrics = this.readSlice(this.exports.training_archive_metrics_ptr(), this.exports.training_archive_metrics_len())
+        const genomes = this.readSlice(this.exports.training_archive_genomes_ptr(), this.exports.training_archive_genomes_len())
+        const stride = this.muscleIds.length * 6
+        return {
+            dimensions: [12, 10, 8],
+            elites: Array.from({ length: cells.length }, (_, index) => ({
+                cell: cells[index],
+                descriptor: [metrics[index * 16 + 13], metrics[index * 16 + 14], metrics[index * 16 + 15]],
+                metrics: this.materializeMetrics(metrics.subarray(index * 16, index * 16 + 16)),
+                genome: this.materializeGenome(genomes.subarray(index * stride, (index + 1) * stride), `archive-${cells[index]}`, generation),
+            })),
+        }
     }
 
     private createRenderSnapshot(maximum: number): TrainingSnapshot["render"] {

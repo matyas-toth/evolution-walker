@@ -11,6 +11,7 @@ import { useRef, useEffect, useCallback, useState } from "react"
 import type { Topology, Creature } from "@/core/types"
 import type { EditorTool, SelectedElement } from "@/hooks/useEditorState"
 import { loadPhysicsWasm, stepPhysicsWasm } from "@/core/physics/wasmGlue"
+import { compileFunctionalAnatomy } from "@/core/training/locomotion"
 
 interface Camera { x: number; y: number; zoom: number }
 
@@ -20,6 +21,7 @@ interface EditorCanvasProps {
     selected: SelectedElement | null
     pendingConnection: string | null
     isPreviewMode: boolean
+    anatomySelection: string[]
     onCanvasClick: (worldX: number, worldY: number) => void
     onParticleClick: (id: string) => void
     onConstraintClick: (id: string) => void
@@ -42,7 +44,7 @@ function distToSegment(px: number, py: number, x1: number, y1: number, x2: numbe
 }
 
 export function EditorCanvas({
-    topology, tool, selected, pendingConnection, isPreviewMode,
+    topology, tool, selected, pendingConnection, isPreviewMode, anatomySelection,
     onCanvasClick, onParticleClick, onConstraintClick, onMuscleClick,
     onParticleDrag, onParticleDragEnd,
 }: EditorCanvasProps) {
@@ -102,7 +104,7 @@ export function EditorCanvas({
                 isDead: false,
                 currentPos: { x: 0, y: 0 },
                 minHeadY: 0,
-                genome: [],
+                genome: { id: "editor-preview", genes: [], generation: 0, createdAt: 0 },
                 particleMap: new Map(),
                 startPos: { x: 0, y: 0 },
                 maxDistance: 0,
@@ -201,6 +203,10 @@ export function EditorCanvas({
         ctx.setLineDash([])
 
         const pMap = new Map(currentTopology.particles.map((p) => [p.id, p]))
+        const anatomy = tool === "anatomy" ? compileFunctionalAnatomy(currentTopology) : null
+        const coreIds = new Set(Array.from(anatomy?.coreIndices ?? []).map((index) => currentTopology.particles[index].id))
+        const protectedIds = new Set(currentTopology.particles.filter((_, index) => anatomy?.protectedMask[index]).map((particle) => particle.id))
+        const contactIds = new Set(currentTopology.particles.filter((_, index) => (anatomy?.particleGroup[index] ?? -1) >= 0).map((particle) => particle.id))
 
         ctx.lineCap = "round"
         for (const c of currentTopology.constraints) {
@@ -246,8 +252,9 @@ export function EditorCanvas({
             const isSel = selected?.type === "particle" && selected.id === p.id
             const isHov = hovered?.type === "particle" && hovered.id === p.id
             const isPending = pendingConnection === p.id
+            const isAnatomySelected = tool === "anatomy" && anatomySelection.includes(p.id)
 
-            if (isSel || isPending) {
+            if (isSel || isPending || isAnatomySelected) {
                 ctx.fillStyle = "oklch(0.72 0.17 162 / 0.15)"
                 ctx.beginPath(); ctx.arc(s.x, s.y, r + 8, 0, Math.PI * 2); ctx.fill()
                 ctx.strokeStyle = "oklch(0.72 0.17 162 / 0.5)"
@@ -255,8 +262,15 @@ export function EditorCanvas({
                 ctx.beginPath(); ctx.arc(s.x, s.y, r + 8, 0, Math.PI * 2); ctx.stroke()
             }
 
-            ctx.fillStyle = isSel ? "oklch(0.90 0.05 162)" : isHov ? "oklch(0.85 0.02 260)" : p.isLocked ? "oklch(0.60 0.15 25)" : "oklch(0.80 0.02 260)"
+            ctx.fillStyle = tool === "anatomy" && contactIds.has(p.id) ? "oklch(0.75 0.16 145)"
+                : tool === "anatomy" && coreIds.has(p.id) ? "oklch(0.72 0.16 245)"
+                : isSel ? "oklch(0.90 0.05 162)" : isHov ? "oklch(0.85 0.02 260)" : p.isLocked ? "oklch(0.60 0.15 25)" : "oklch(0.80 0.02 260)"
             ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, Math.PI * 2); ctx.fill()
+            if (tool === "anatomy" && protectedIds.has(p.id)) {
+                ctx.strokeStyle = "oklch(0.75 0.15 75)"
+                ctx.lineWidth = 2
+                ctx.beginPath(); ctx.arc(s.x, s.y, r + 3, 0, Math.PI * 2); ctx.stroke()
+            }
 
             if (cam.zoom > 0.6) {
                 ctx.fillStyle = "oklch(0.50 0.01 260)"
@@ -270,7 +284,7 @@ export function EditorCanvas({
         ctx.font = "11px var(--font-geist-mono), monospace"
         ctx.textAlign = "left"
         ctx.fillText(`${Math.round(cam.zoom * 100)}%`, 8, h - 8)
-    }, [selected, hovered, pendingConnection, tool, worldToScreen])
+    }, [selected, hovered, pendingConnection, tool, worldToScreen, anatomySelection])
 
     useEffect(() => {
         const loop = (time: number) => {

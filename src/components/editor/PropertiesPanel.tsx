@@ -6,12 +6,15 @@
 
 "use client"
 
+import { useMemo } from "react"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
-import type { Topology, TopologyParticle, TopologyConstraint, TopologyMuscle } from "@/core/types"
+import type { LocomotionAnatomy, Topology, TopologyParticle, TopologyConstraint, TopologyMuscle } from "@/core/types"
 import type { SelectedElement, EditorTool } from "@/hooks/useEditorState"
+import { compileFunctionalAnatomy } from "@/core/training/locomotion"
 
 interface PropertiesPanelProps {
     topology: Topology
@@ -20,6 +23,8 @@ interface PropertiesPanelProps {
     onUpdateParticle: (id: string, updates: Partial<TopologyParticle>) => void
     onUpdateConstraint: (id: string, updates: Partial<TopologyConstraint>) => void
     onUpdateMuscle: (id: string, updates: Partial<TopologyMuscle>) => void
+    anatomySelection: string[]
+    onUpdateLocomotion: (locomotion?: LocomotionAnatomy) => void
 }
 
 function NumberField({ label, value, onChange, min, max, step = 0.1 }: {
@@ -42,8 +47,102 @@ function NumberField({ label, value, onChange, min, max, step = 0.1 }: {
 }
 
 export function PropertiesPanel({
-    topology, selected, tool, onUpdateParticle, onUpdateConstraint, onUpdateMuscle,
+    topology, selected, tool, onUpdateParticle, onUpdateConstraint, onUpdateMuscle, anatomySelection, onUpdateLocomotion,
 }: PropertiesPanelProps) {
+    const inferredAnatomy = useMemo(() => compileFunctionalAnatomy({ ...topology, locomotion: undefined }), [topology])
+
+    if (tool === "anatomy") {
+        const explicit = topology.locomotion
+        const selectedSet = new Set(anatomySelection)
+        const updateRole = (role: "coreParticleIds" | "protectedParticleIds") => {
+            const current = new Set(explicit?.[role] ?? [])
+            const shouldRemove = anatomySelection.length > 0 && anatomySelection.every((id) => current.has(id))
+            for (const id of anatomySelection) shouldRemove ? current.delete(id) : current.add(id)
+            onUpdateLocomotion({ ...explicit, [role]: Array.from(current) })
+        }
+        const createGroup = () => {
+            if (!anatomySelection.length) return
+            const groups = (explicit?.contactGroups ?? [])
+                .map((group) => ({ ...group, particleIds: group.particleIds.filter((id) => !selectedSet.has(id)) }))
+                .filter((group) => group.particleIds.length)
+            let suffix = groups.length + 1
+            while (groups.some((group) => group.id === `contact-${suffix}`)) suffix++
+            groups.push({ id: `contact-${suffix}`, particleIds: [...anatomySelection] })
+            onUpdateLocomotion({ ...explicit, contactGroups: groups })
+        }
+        const removeAssignments = () => onUpdateLocomotion({
+            ...explicit,
+            coreParticleIds: explicit?.coreParticleIds?.filter((id) => !selectedSet.has(id)),
+            protectedParticleIds: explicit?.protectedParticleIds?.filter((id) => !selectedSet.has(id)),
+            contactGroups: explicit?.contactGroups
+                ?.map((group) => ({ ...group, particleIds: group.particleIds.filter((id) => !selectedSet.has(id)) }))
+                .filter((group) => group.particleIds.length),
+        })
+
+        return (
+            <div className="w-72 shrink-0 space-y-4 overflow-y-auto border-l border-border bg-card p-4">
+                <div>
+                    <h3 className="text-sm font-semibold">Locomotion Anatomy</h3>
+                    <p className="mt-1 text-xs text-muted-foreground">Select any number of endpoint particles, then describe their functional role. Branch muscles are compiled automatically.</p>
+                </div>
+                <div className="rounded-md border border-border/70 bg-muted/30 p-3 text-xs">
+                    <div className="flex justify-between"><span className="text-muted-foreground">Selected</span><span className="font-mono">{anatomySelection.length}</span></div>
+                    <p className="mt-2 break-words font-mono text-[10px] text-muted-foreground">{anatomySelection.join(", ") || "Click particles on the canvas"}</p>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                    <Button size="sm" variant="outline" disabled={!anatomySelection.length} onClick={() => updateRole("coreParticleIds")}>Toggle core</Button>
+                    <Button size="sm" variant="outline" disabled={!anatomySelection.length} onClick={() => updateRole("protectedParticleIds")}>Toggle protected</Button>
+                    <Button size="sm" disabled={!anatomySelection.length} onClick={createGroup}>New contact group</Button>
+                    <Button size="sm" variant="ghost" disabled={!anatomySelection.length} onClick={removeAssignments}>Clear roles</Button>
+                </div>
+                <Separator />
+                <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                        <Label className="text-xs">Contact groups</Label>
+                        <span className="font-mono text-xs text-muted-foreground">{explicit?.contactGroups?.length ?? 0}</span>
+                    </div>
+                    {(explicit?.contactGroups ?? []).map((group) => (
+                        <div key={group.id} className="rounded-md border border-border/60 p-2 text-xs">
+                            <div className="font-mono font-medium">{group.id}</div>
+                            <div className="my-1 truncate text-[10px] text-muted-foreground">{group.particleIds.join(", ")}</div>
+                            <Label className="text-[10px] text-muted-foreground">Paired with</Label>
+                            <select
+                                value={group.pairedWith ?? ""}
+                                onChange={(event) => {
+                                    const pairedWith = event.target.value || undefined
+                                    onUpdateLocomotion({
+                                        ...explicit,
+                                        contactGroups: explicit?.contactGroups?.map((candidate) => {
+                                            if (candidate.id === group.id) return { ...candidate, pairedWith }
+                                            if (candidate.id === pairedWith) return { ...candidate, pairedWith: group.id }
+                                            if (candidate.pairedWith === group.id || candidate.pairedWith === pairedWith) {
+                                                return { ...candidate, pairedWith: undefined }
+                                            }
+                                            return candidate
+                                        }),
+                                    })
+                                }}
+                                className="mt-1 h-7 w-full rounded-md border border-input bg-background px-2 text-xs"
+                            >
+                                <option value="">Unpaired</option>
+                                {(explicit?.contactGroups ?? []).filter((candidate) => candidate.id !== group.id).map((candidate) => (
+                                    <option key={candidate.id} value={candidate.id}>{candidate.id}</option>
+                                ))}
+                            </select>
+                        </div>
+                    ))}
+                </div>
+                <Separator />
+                <div className="space-y-2 text-xs">
+                    <div className="flex items-center justify-between"><span className="font-medium">Inference preview</span><span className="text-muted-foreground">deterministic</span></div>
+                    <p className="text-muted-foreground">{inferredAnatomy.coreIndices.length} core particles · {inferredAnatomy.contactGroups.length} distal contact groups · {inferredAnatomy.muscleGroup.filter((value) => value >= 0).length} branch muscles</p>
+                    <Button size="sm" variant="secondary" className="w-full" onClick={() => onUpdateLocomotion(undefined)}>Use automatic inference</Button>
+                    {!explicit?.contactGroups?.length && explicit ? <p className="text-amber-600 dark:text-amber-400">No explicit contact group is assigned; training will infer effectors.</p> : null}
+                </div>
+            </div>
+        )
+    }
+
     if (!selected) {
         return (
             <div className="w-64 shrink-0 border-l border-border bg-card p-4">

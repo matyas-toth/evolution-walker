@@ -77,6 +77,20 @@ export interface TopologyMuscle {
   damping: number;
 }
 
+/** A generalized group of particles that can support or propel a creature. */
+export interface LocomotionContactGroup {
+  id: string;
+  particleIds: string[];
+  pairedWith?: string;
+}
+
+/** Optional functional anatomy. Missing fields are inferred deterministically. */
+export interface LocomotionAnatomy {
+  coreParticleIds?: string[];
+  protectedParticleIds?: string[];
+  contactGroups?: LocomotionContactGroup[];
+}
+
 /**
  * Topology definition (structure of creature)
  * Complete blueprint for a creature's physical structure
@@ -96,4 +110,7 @@ export interface Topology {
   
   /** Array of active muscles */
   muscles: TopologyMuscle[];
+
+  /** Optional locomotion semantics; automatically inferred when omitted. */
+  locomotion?: LocomotionAnatomy;
 }

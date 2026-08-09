@@ -176,6 +176,12 @@ export interface TrainingHubConfig {
   workerCount?: 'auto' | number
   /** Maximum worker-to-UI update frequency. */
   snapshotHz?: number
+  /** Versioned evaluation profile. Missing values upgrade to adaptive locomotion. */
+  fitnessVersion?: 'adaptive-locomotion-v2' | 'distance-v1'
+  /** Version of the muscle controller ABI. */
+  controllerVersion?: 2
+  /** Source session retained when an old run is upgraded through a continuation. */
+  upgradedFromSessionId?: string
 }
 
 /**

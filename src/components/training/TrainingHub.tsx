@@ -12,7 +12,7 @@ import { FitnessChart } from "./FitnessChart"
 import { ReplayOverlay } from "./ReplayOverlay"
 import { saveTrainingSession } from "@/app/actions/sessions"
 import { getTrainingTargetZone, TRAINING_GROUND_Y } from "@/core/training/world"
-import type { Topology, TrainingHubConfig, ReplayPhase, Creature, Genome, PackedTrainingReplay } from "@/core/types"
+import type { Topology, TrainingHubConfig, ReplayPhase, Creature, Genome, PackedTrainingReplay, LocomotionMetrics, QdArchiveExport } from "@/core/types"
 
 interface SerializedSession {
     id: string
@@ -20,6 +20,8 @@ interface SerializedSession {
     population: Genome[]
     bestGenome: Genome
     generation: number
+    archive?: QdArchiveExport
+    bestMetrics?: LocomotionMetrics
 }
 
 interface TrainingHubProps {
@@ -32,8 +34,7 @@ interface TrainingHubProps {
 
 /** Derives initial config state from an optional saved session or sensible defaults. */
 function resolveInitialConfig(session?: SerializedSession): TrainingHubConfig {
-    if (session?.config) return session.config
-    return {
+    const defaults: TrainingHubConfig = {
         populationSize: 500,
         generationDuration: 10,
         mutationRate: 0.12,
@@ -47,6 +48,17 @@ function resolveInitialConfig(session?: SerializedSession): TrainingHubConfig {
         seed: 0x6d2b79f5,
         workerCount: "auto",
         snapshotHz: 5,
+        fitnessVersion: "adaptive-locomotion-v2",
+        controllerVersion: 2,
+    }
+    if (!session?.config) return defaults
+    const legacyObjective = session.config.fitnessVersion !== "adaptive-locomotion-v2"
+    return {
+        ...defaults,
+        ...session.config,
+        fitnessVersion: "adaptive-locomotion-v2",
+        controllerVersion: 2,
+        upgradedFromSessionId: legacyObjective ? session.id : session.config.upgradedFromSessionId,
     }
 }
 
@@ -56,6 +68,7 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
     const [replayPhase, setReplayPhase] = useState<ReplayPhase>({ type: "none" })
     const [replayData, setReplayData] = useState<PackedTrainingReplay | null>(null)
     const [isSaving, setIsSaving] = useState(false)
+    const [victoryMetrics, setVictoryMetrics] = useState<LocomotionMetrics | null>(null)
 
     useEffect(() => {
         const query = new URLSearchParams(window.location.search)
@@ -63,6 +76,7 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
         const population = Number(query.get("population"))
         const duration = Number(query.get("duration"))
         const seed = Number(query.get("seed"))
+        const legacyObjective = process.env.NODE_ENV === "development" && query.get("objective") === "distance-v1"
         setConfig((current) => ({
             ...current,
             backend: ["auto", "webgpu", "wasm-simd", "wasm-scalar", "legacy"].includes(requested ?? "")
@@ -75,11 +89,13 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
                 ? Math.round(duration)
                 : current.generationDuration,
             seed: query.has("seed") && Number.isFinite(seed) ? seed >>> 0 : current.seed,
+            fitnessVersion: legacyObjective ? "distance-v1" : "adaptive-locomotion-v2",
         }))
     }, [])
 
-    const handleTargetReached = useCallback((winner: Creature) => {
+    const handleTargetReached = useCallback((winner: Creature, metrics: LocomotionMetrics) => {
         setReplayData(null)
+        setVictoryMetrics(metrics)
         setReplayPhase({ type: "preparing", genome: winner.genome, generation: winner.genome.generation })
     }, [])
 
@@ -88,6 +104,8 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
         topology,
         initialPopulation: initialSession?.population,
         initialGeneration: initialSession?.generation,
+        initialArchive: initialSession?.archive,
+        initialBestMetrics: initialSession?.bestMetrics,
         onTargetReached: handleTargetReached,
     }
 
@@ -98,9 +116,13 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
         progress,
         fitnessHistory,
         bestCreatureEver,
+        bestFitness,
         diagnostics,
         error,
         pausePending,
+        bestMetrics,
+        archiveCoverage,
+        curriculumStage,
         exportSession,
         requestReplay,
         start,
@@ -150,7 +172,9 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
                 config,
                 population: engineState.population,
                 bestGenome: replayPhase.genome,
-                bestFitness: bestCreatureEver?.fitness?.total ?? 0,
+                bestFitness: engineState.bestFitness,
+                archive: engineState.archive,
+                bestMetrics: victoryMetrics ?? engineState.bestMetrics,
                 generation,
                 reachedTarget: true,
             })
@@ -161,11 +185,12 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
         } finally {
             setIsSaving(false)
         }
-    }, [replayPhase, creatureId, config, generation, bestCreatureEver, exportSession, router])
+    }, [replayPhase, creatureId, config, generation, bestCreatureEver, exportSession, router, victoryMetrics])
 
     const handleContinue = useCallback((newTargetDistance: number) => {
         setReplayData(null)
         setReplayPhase({ type: "none" })
+        setVictoryMetrics(null)
         setConfig((prev) => ({ ...prev, targetDistance: newTargetDistance }))
         // Reset the targetReachedFired flag by resetting + starting fresh
         reset()
@@ -182,7 +207,9 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
             config,
             population: engineState.population,
             bestGenome: bestCreatureEver.genome,
-            bestFitness: bestCreatureEver.fitness?.total ?? 0,
+            bestFitness: engineState.bestFitness,
+            archive: engineState.archive,
+            bestMetrics: engineState.bestMetrics,
             generation,
             reachedTarget: false,
         })
@@ -236,6 +263,7 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
                                 replayError={replayPhase.type === "error" ? replayPhase.message : undefined}
                                 currentTargetDistance={config.targetDistance}
                                 isSaving={isSaving}
+                                metrics={victoryMetrics}
                                 onSaveAndExit={handleSaveAndExit}
                                 onContinue={handleContinue}
                             />
@@ -256,7 +284,11 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
                     isPaused={isPaused}
                     generation={generation}
                     progress={progress}
-                    bestFitness={bestCreatureEver?.fitness?.total ?? 0}
+                    bestFitness={bestFitness}
+                    bestMetrics={bestMetrics}
+                    archiveCoverage={archiveCoverage}
+                    curriculumStage={curriculumStage}
+                    upgradedObjective={Boolean(config.upgradedFromSessionId)}
                     onToggleStart={handleToggleStart}
                     onReset={reset}
                     onSaveProgress={handleSaveProgress}

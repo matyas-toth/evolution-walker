@@ -6,7 +6,7 @@
 
 import { NextResponse } from "next/server"
 import { z } from "zod"
-import { Prisma } from "@prisma/client"
+import { Prisma } from "@/generated/prisma"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 
@@ -18,6 +18,7 @@ const createCreatureSchema = z.object({
         particles: z.array(z.any()),
         constraints: z.array(z.any()),
         muscles: z.array(z.any()),
+        locomotion: z.any().optional(),
     }).optional(),
 })
 

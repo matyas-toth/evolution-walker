@@ -21,6 +21,15 @@ export interface MuscleGene {
 
   /** Phase offset (radians, 0..2π) */
   phase: number;
+
+  /** Coupling to structurally neighboring muscle oscillators (0..1). */
+  couplingStrength?: number;
+
+  /** Response to the associated effector touching ground (-1..1). */
+  contactReflexGain?: number;
+
+  /** Response to normalized core posture error (-1..1). */
+  postureReflexGain?: number;
 }
 
 /**

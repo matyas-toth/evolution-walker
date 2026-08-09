@@ -1,4 +1,4 @@
-import type { Genome, PackedTrainingReplay, TrainingEngineConfig, TrainingEngineState, TrainingSnapshot } from "@/core/types"
+import type { Genome, LocomotionCurriculumStage, LocomotionMetrics, PackedTrainingReplay, TrainingEngineConfig, TrainingEngineState, TrainingSnapshot } from "@/core/types"
 
 export interface EvaluatedGeneration {
     generation: number
@@ -8,6 +8,10 @@ export interface EvaluatedGeneration {
     targetIndex: number
     bestGenome: Genome
     targetGenome: Genome | null
+    bestMetrics: LocomotionMetrics
+    targetMetrics: LocomotionMetrics | null
+    archiveCoverage: number
+    curriculumStage: LocomotionCurriculumStage
 }
 
 /** Common contract shared by worker-local CPU, WASM, and GPU engines. */

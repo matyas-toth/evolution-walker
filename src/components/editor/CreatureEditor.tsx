@@ -53,7 +53,9 @@ export function CreatureEditor({ creatureId, initialName, initialTopology }: Cre
     }, [state.tool, addParticle, dispatch])
 
     const handleParticleClick = useCallback((id: string) => {
-        if (state.tool === "select") {
+        if (state.tool === "anatomy") {
+            dispatch({ type: "TOGGLE_ANATOMY_PARTICLE", id })
+        } else if (state.tool === "select") {
             dispatch({ type: "SELECT", element: { type: "particle", id } })
         } else if (state.tool === "constraint" || state.tool === "muscle") {
             if (!state.pendingConnection) {
@@ -141,6 +143,7 @@ export function CreatureEditor({ creatureId, initialName, initialTopology }: Cre
                     selected={state.selected}
                     pendingConnection={state.pendingConnection}
                     isPreviewMode={state.isPreviewMode}
+                    anatomySelection={state.anatomySelection}
                     onCanvasClick={handleCanvasClick}
                     onParticleClick={handleParticleClick}
                     onConstraintClick={handleConstraintClick}
@@ -156,6 +159,8 @@ export function CreatureEditor({ creatureId, initialName, initialTopology }: Cre
                     onUpdateParticle={(id, updates) => dispatch({ type: "UPDATE_PARTICLE", id, updates })}
                     onUpdateConstraint={(id, updates) => dispatch({ type: "UPDATE_CONSTRAINT", id, updates })}
                     onUpdateMuscle={(id, updates) => dispatch({ type: "UPDATE_MUSCLE", id, updates })}
+                    anatomySelection={state.anatomySelection}
+                    onUpdateLocomotion={(locomotion) => dispatch({ type: "UPDATE_LOCOMOTION", locomotion })}
                 />
             </div>
         </div>

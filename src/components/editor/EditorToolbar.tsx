@@ -6,7 +6,7 @@
 "use client"
 
 import { useEffect } from "react"
-import { MousePointer2, Circle, Minus, Zap, Trash2, Undo2, Redo2, Play, Square } from "lucide-react"
+import { MousePointer2, Circle, Minus, Zap, Trash2, Undo2, Redo2, Play, Square, ScanSearch } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Separator } from "@/components/ui/separator"
@@ -26,6 +26,7 @@ interface EditorToolbarProps {
 
 const tools: { id: EditorTool; label: string; icon: React.ElementType; shortcut: string }[] = [
     { id: "select", label: "Select & Move", icon: MousePointer2, shortcut: "V" },
+    { id: "anatomy", label: "Locomotion Anatomy", icon: ScanSearch, shortcut: "A" },
     { id: "particle", label: "Add Particle", icon: Circle, shortcut: "P" },
     { id: "constraint", label: "Add Constraint", icon: Minus, shortcut: "C" },
     { id: "muscle", label: "Add Muscle", icon: Zap, shortcut: "M" },

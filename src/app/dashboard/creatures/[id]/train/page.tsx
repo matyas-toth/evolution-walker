@@ -29,7 +29,7 @@ export default async function TrainCreaturePage({
     if (sessionId) {
         const ts = await prisma.trainingSession.findUnique({
             where: { id: sessionId },
-            select: { id: true, config: true, population: true, bestGenome: true, generation: true }
+            select: { id: true, config: true, population: true, bestGenome: true, generation: true, archive: true, bestMetrics: true }
         })
         if (ts) {
             initialSession = {
@@ -38,6 +38,8 @@ export default async function TrainCreaturePage({
                 population: ts.population as any,
                 bestGenome: ts.bestGenome as any,
                 generation: ts.generation,
+                archive: ts.archive as any,
+                bestMetrics: ts.bestMetrics as any,
             }
         }
     }

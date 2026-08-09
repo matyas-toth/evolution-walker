@@ -12,6 +12,7 @@ import type {
 import type { EvaluatedGeneration, TrainingBackendEngine } from "./engineBackend"
 import { RustWasmTrainingEngine } from "./RustWasmTrainingEngine"
 import { captureReplayFrames } from "./replayCapture"
+import { emptyLocomotionMetrics } from "./locomotion"
 
 interface ShardResponse {
     id: number
@@ -77,7 +78,7 @@ export class MulticoreWasmTrainingEngine implements TrainingBackendEngine {
     private generationStartedAt = performance.now()
     private memoryBytes = 0
 
-    static async create(topology: Topology, config: TrainingEngineConfig, population: Genome[] | undefined, generation: number, backend: ActiveTrainingBackend): Promise<MulticoreWasmTrainingEngine> {
+    static async create(topology: Topology, config: TrainingEngineConfig, population: Genome[] | undefined, generation: number, backend: ActiveTrainingBackend, initialArchive?: TrainingEngineState["archive"], initialBestMetrics?: TrainingEngineState["bestMetrics"]): Promise<MulticoreWasmTrainingEngine> {
         const startedAt = performance.now()
         const hardwareWorkers = Math.max(1, (navigator.hardwareConcurrency || 2) - 1)
         const requested = config.workerCount === "auto" ? hardwareWorkers : Math.max(1, Math.floor(config.workerCount))
@@ -89,7 +90,7 @@ export class MulticoreWasmTrainingEngine implements TrainingBackendEngine {
             const size = Math.ceil((config.populationSize - populationCursor) / remainingWorkers)
             const client = new ShardClient()
             const shardConfig: TrainingEngineConfig = { ...config, populationSize: size, workerCount: 1, seed: (config.seed + shard * 0x9e3779b9) >>> 0 }
-            await client.request({ type: "init", topology, config: shardConfig, population: population?.slice(populationCursor, populationCursor + size), generation, backend })
+            await client.request({ type: "init", topology, config: shardConfig, population: population?.slice(populationCursor, populationCursor + size), generation, backend, initialArchive, initialBestMetrics })
             descriptors.push({ client, populationSize: size })
             populationCursor += size
         }
@@ -164,6 +165,9 @@ export class MulticoreWasmTrainingEngine implements TrainingBackendEngine {
             phase, generation: this.generation, progress: Math.round(this.progress),
             bestFitness: Number.isFinite(this.bestFitness) ? this.bestFitness : 0,
             averageFitness: this.pendingEvaluation?.averageFitness ?? 0,
+            bestMetrics: this.pendingEvaluation?.bestMetrics ?? emptyLocomotionMetrics(),
+            archiveCoverage: this.pendingEvaluation?.archiveCoverage ?? 0,
+            curriculumStage: this.pendingEvaluation?.curriculumStage ?? "discovery",
             diagnostics: {
                 backend: this.backend, workerCount: this.shards.length,
                 generationsPerSecond: average ? 1000 / average : 0,
@@ -177,11 +181,21 @@ export class MulticoreWasmTrainingEngine implements TrainingBackendEngine {
 
     async exportState(): Promise<TrainingEngineState> {
         const responses = await Promise.all(this.shards.map((shard) => shard.client.request({ type: "export" })))
+        const elites = new Map<number, NonNullable<TrainingEngineState["archive"]["elites"]>[number]>()
+        for (const response of responses) for (const elite of response.state?.archive.elites ?? []) {
+            const current = elites.get(elite.cell)
+            if (!current || elite.metrics.progress > current.metrics.progress
+                || (elite.metrics.progress === current.metrics.progress && elite.metrics.locomotionQuality > current.metrics.locomotionQuality)
+                || (elite.metrics.progress === current.metrics.progress && elite.metrics.locomotionQuality === current.metrics.locomotionQuality
+                    && elite.metrics.transportCost < current.metrics.transportCost)) elites.set(elite.cell, elite)
+        }
         return {
             population: responses.flatMap((response) => response.state?.population ?? []),
             bestGenome: this.bestGenome,
             bestFitness: Number.isFinite(this.bestFitness) ? this.bestFitness : 0,
             generation: this.generation,
+            archive: { dimensions: [12, 10, 8], elites: Array.from(elites.values()) },
+            bestMetrics: this.pendingEvaluation?.bestMetrics ?? emptyLocomotionMetrics(),
         }
     }
 
@@ -206,11 +220,30 @@ export class MulticoreWasmTrainingEngine implements TrainingBackendEngine {
     private combineEvaluations(responses: ShardResponse[]): void {
         const evaluations = responses.map((response) => response.evaluated).filter((value): value is EvaluatedGeneration => Boolean(value))
         if (!evaluations.length) throw new Error("WASM shards returned no generation results")
-        const best = evaluations.reduce((winner, candidate) => candidate.bestFitness > winner.bestFitness ? candidate : winner)
-        const target = evaluations.find((evaluation) => evaluation.targetGenome)
+        const best = evaluations.reduce((winner, candidate) => {
+            if (candidate.bestMetrics.progress !== winner.bestMetrics.progress) {
+                return candidate.bestMetrics.progress > winner.bestMetrics.progress ? candidate : winner
+            }
+            return candidate.bestMetrics.locomotionQuality > winner.bestMetrics.locomotionQuality ? candidate : winner
+        })
+        const targets = evaluations.filter((evaluation) => evaluation.targetGenome && evaluation.targetMetrics)
+        const target = targets.reduce<EvaluatedGeneration | null>((winner, candidate) => {
+            if (!winner) return candidate
+            const qualityDelta = candidate.targetMetrics!.locomotionQuality - winner.targetMetrics!.locomotionQuality
+            if (qualityDelta !== 0) return qualityDelta > 0 ? candidate : winner
+            return candidate.targetMetrics!.transportCost < winner.targetMetrics!.transportCost ? candidate : winner
+        }, null)
         const averageFitness = evaluations.reduce((sum, evaluation, index) => sum + evaluation.averageFitness * this.shards[index].populationSize, 0) / this.config.populationSize
         if (best.bestFitness > this.bestFitness) { this.bestFitness = best.bestFitness; this.bestGenome = best.bestGenome }
-        this.pendingEvaluation = { ...best, generation: this.generation, averageFitness, targetGenome: target?.targetGenome ?? null, targetIndex: target ? target.targetIndex : -1 }
+        this.pendingEvaluation = {
+            ...best,
+            generation: this.generation,
+            averageFitness,
+            targetGenome: target?.targetGenome ?? null,
+            targetIndex: target ? target.targetIndex : -1,
+            targetMetrics: target?.targetMetrics ?? null,
+            archiveCoverage: Math.max(...evaluations.map((evaluation) => evaluation.archiveCoverage)),
+        }
     }
 
     private combineRenderSnapshots(responses: ShardResponse[]): PackedRenderSnapshot | undefined {

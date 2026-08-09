@@ -70,8 +70,10 @@ export class TrainingEngineClient {
         config: TrainingEngineConfig,
         initialPopulation?: Genome[],
         initialGeneration?: number,
+        initialArchive?: TrainingEngineState["archive"],
+        initialBestMetrics?: TrainingEngineState["bestMetrics"],
     ): void {
-        this.post({ type: "init", topology, config, initialPopulation, initialGeneration })
+        this.post({ type: "init", topology, config, initialPopulation, initialGeneration, initialArchive, initialBestMetrics })
     }
 
     start(): void {

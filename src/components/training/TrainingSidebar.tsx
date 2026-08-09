@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Brain, Save, Play, Square, Loader2 } from "lucide-react"
-import type { TrainingDiagnostics, TrainingHubConfig } from "@/core/types"
+import type { LocomotionCurriculumStage, LocomotionMetrics, TrainingDiagnostics, TrainingHubConfig } from "@/core/types"
+import { describeGait } from "@/core/training/locomotion"
 import { toast } from "sonner"
 
 interface TrainingSidebarProps {
@@ -19,6 +20,10 @@ interface TrainingSidebarProps {
     generation: number
     progress: number
     bestFitness: number
+    bestMetrics: LocomotionMetrics | null
+    archiveCoverage: number
+    curriculumStage: LocomotionCurriculumStage
+    upgradedObjective: boolean
     onToggleStart: () => void
     onReset: () => void
     onSaveProgress: (name: string) => Promise<void>
@@ -37,6 +42,10 @@ export function TrainingSidebar({
     generation,
     progress,
     bestFitness,
+    bestMetrics,
+    archiveCoverage,
+    curriculumStage,
+    upgradedObjective,
     onToggleStart,
     onReset,
     onSaveProgress,
@@ -77,6 +86,30 @@ export function TrainingSidebar({
                     <div className="bg-muted p-2 rounded-lg text-center">
                         <div className="text-muted-foreground mb-1">Max Fitness</div>
                         <div className="font-mono text-lg font-bold text-primary">{bestFitness.toFixed(0)}</div>
+                    </div>
+                </div>
+
+                {upgradedObjective ? (
+                    <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-xs text-amber-700 dark:text-amber-300">
+                        Upgraded objective: this adaptive continuation starts a new deterministic boundary; the original saved run remains unchanged.
+                    </div>
+                ) : null}
+
+                <div className="space-y-2 rounded-lg border border-border/70 bg-muted/30 p-3">
+                    <div className="flex items-baseline justify-between">
+                        <span className="text-xs text-muted-foreground">Locomotion grade</span>
+                        <span className="font-mono text-xl font-semibold text-sky-500">{(bestMetrics?.locomotionQuality ?? 0).toFixed(0)}<span className="text-xs text-muted-foreground">/100</span></span>
+                    </div>
+                    <p className="text-xs font-medium capitalize">{bestMetrics ? describeGait(bestMetrics) : "Awaiting first evaluation"}</p>
+                    <div className="grid grid-cols-3 gap-x-2 gap-y-1 text-[10px]">
+                        <span className="text-muted-foreground">Stage</span><span className="col-span-2 text-right capitalize">{curriculumStage}</span>
+                        <span className="text-muted-foreground">Archive</span><span className="col-span-2 text-right font-mono">{(archiveCoverage * 100).toFixed(1)}%</span>
+                        <span className="text-muted-foreground">Contact use</span><span className="col-span-2 text-right font-mono">{(bestMetrics?.contactUtilization ?? 0).toFixed(0)}</span>
+                        <span className="text-muted-foreground">Periodicity</span><span className="col-span-2 text-right font-mono">{(bestMetrics?.periodicity ?? 0).toFixed(0)}</span>
+                        <span className="text-muted-foreground">Traction</span><span className="col-span-2 text-right font-mono">{(bestMetrics?.traction ?? 0).toFixed(0)}</span>
+                        <span className="text-muted-foreground">Carriage</span><span className="col-span-2 text-right font-mono">{(bestMetrics?.carriage ?? 0).toFixed(0)}</span>
+                        <span className="text-muted-foreground">Smoothness</span><span className="col-span-2 text-right font-mono">{(bestMetrics?.smoothness ?? 0).toFixed(0)}</span>
+                        <span className="text-muted-foreground">Efficiency</span><span className="col-span-2 text-right font-mono">{(bestMetrics?.energyEfficiency ?? 0).toFixed(0)}</span>
                     </div>
                 </div>
 

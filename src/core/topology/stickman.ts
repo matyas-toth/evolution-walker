@@ -20,6 +20,14 @@ import { Topology } from '@/core/types';
 export const STICKMAN_TOPOLOGY: Topology = {
   id: 'stickman',
   name: 'Stickman',
+  locomotion: {
+    coreParticleIds: ['torso', 'l-shoulder', 'r-shoulder', 'l-hip', 'r-hip'],
+    protectedParticleIds: ['head', 'torso', 'l-shoulder', 'r-shoulder', 'l-hand', 'r-hand'],
+    contactGroups: [
+      { id: 'left-foot', particleIds: ['l-foot'], pairedWith: 'right-foot' },
+      { id: 'right-foot', particleIds: ['r-foot'], pairedWith: 'left-foot' },
+    ],
+  },
   
   particles: [
     // Head
