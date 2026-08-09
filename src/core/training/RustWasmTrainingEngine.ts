@@ -2,6 +2,7 @@ import type {
     ActiveTrainingBackend,
     Genome,
     MuscleGene,
+    PackedTrainingReplay,
     Topology,
     TrainingEngineConfig,
     TrainingEngineState,
@@ -9,6 +10,7 @@ import type {
     TrainingStageTimings,
 } from "@/core/types"
 import type { EvaluatedGeneration, TrainingBackendEngine } from "./engineBackend"
+import { captureReplayFrames } from "./replayCapture"
 
 interface TrainingWasmExports {
     memory: WebAssembly.Memory
@@ -244,6 +246,24 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
             bestFitness: Number.isFinite(this.bestFitness) ? this.bestFitness : 0,
             generation,
         }
+    }
+
+    async createReplay(genome: Genome): Promise<PackedTrainingReplay> {
+        const replayConfig: TrainingEngineConfig = {
+            ...this.config,
+            backend: this.backend,
+            populationSize: 1,
+            workerCount: 1,
+            backgroundMode: false,
+        }
+        const replayEngine = await RustWasmTrainingEngine.create(
+            this.topology,
+            replayConfig,
+            [genome],
+            genome.generation,
+            this.backend,
+        )
+        return captureReplayFrames(replayEngine, this.topology, replayConfig, genome, this.backend)
     }
 
     private createInput(initialPopulation: Genome[] | undefined, initialGeneration: number): Float32Array {

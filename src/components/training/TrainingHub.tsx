@@ -11,7 +11,8 @@ import { SimulationCanvas } from "./SimulationCanvas"
 import { FitnessChart } from "./FitnessChart"
 import { ReplayOverlay } from "./ReplayOverlay"
 import { saveTrainingSession } from "@/app/actions/sessions"
-import type { Topology, TrainingHubConfig, ReplayPhase, Creature, Genome } from "@/core/types"
+import { getTrainingTargetZone, TRAINING_GROUND_Y } from "@/core/training/world"
+import type { Topology, TrainingHubConfig, ReplayPhase, Creature, Genome, PackedTrainingReplay } from "@/core/types"
 
 interface SerializedSession {
     id: string
@@ -53,6 +54,7 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
     const router = useRouter()
     const [config, setConfig] = useState<TrainingHubConfig>(resolveInitialConfig(initialSession))
     const [replayPhase, setReplayPhase] = useState<ReplayPhase>({ type: "none" })
+    const [replayData, setReplayData] = useState<PackedTrainingReplay | null>(null)
     const [isSaving, setIsSaving] = useState(false)
 
     useEffect(() => {
@@ -76,12 +78,10 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
         }))
     }, [])
 
-    const { replayCreature, replayProgress, startReplay, stopReplay } = useReplay(topology)
-
     const handleTargetReached = useCallback((winner: Creature) => {
-        setReplayPhase({ type: "active", genome: winner.genome, generation: winner.genome.generation })
-        startReplay(winner.genome)
-    }, [startReplay])
+        setReplayData(null)
+        setReplayPhase({ type: "preparing", genome: winner.genome, generation: winner.genome.generation })
+    }, [])
 
     const evolutionProps: UseEvolutionProps = {
         ...config,
@@ -102,14 +102,37 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
         error,
         pausePending,
         exportSession,
+        requestReplay,
         start,
         stop,
         reset,
     } = useEvolution(evolutionProps)
 
+    useEffect(() => {
+        if (replayPhase.type !== "preparing") return
+        let cancelled = false
+        const { genome, generation } = replayPhase
+        requestReplay(genome).then((replay) => {
+            if (cancelled) return
+            setReplayData(replay)
+            setReplayPhase({ type: "active", genome, generation })
+        }).catch((replayError) => {
+            if (cancelled) return
+            setReplayPhase({
+                type: "error",
+                genome,
+                generation,
+                message: replayError instanceof Error ? replayError.message : "Exact replay capture failed",
+            })
+        })
+        return () => { cancelled = true }
+    }, [replayPhase, requestReplay])
+
+    const { frameIndex: replayFrameIndex, replayProgress } = useReplay(replayData)
+
     const isRunning = phase === "running" || phase === "evaluating" || phase === "evolving"
     const isPaused = phase === "paused"
-    const isReplayActive = replayPhase.type === "active"
+    const isReplayActive = replayPhase.type !== "none"
 
     const handleToggleStart = () => {
         if (isRunning) stop()
@@ -117,7 +140,7 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
     }
 
     const handleSaveAndExit = useCallback(async (runName: string) => {
-        if (replayPhase.type !== "active") return
+        if (replayPhase.type === "none") return
         setIsSaving(true)
         try {
             const engineState = await exportSession()
@@ -131,24 +154,24 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
                 generation,
                 reachedTarget: true,
             })
-            stopReplay()
+            setReplayData(null)
             router.push(`/dashboard/creatures`)
         } catch (err) {
             console.error("Failed to save session:", err)
         } finally {
             setIsSaving(false)
         }
-    }, [replayPhase, creatureId, config, generation, bestCreatureEver, exportSession, stopReplay, router])
+    }, [replayPhase, creatureId, config, generation, bestCreatureEver, exportSession, router])
 
     const handleContinue = useCallback((newTargetDistance: number) => {
-        stopReplay()
+        setReplayData(null)
         setReplayPhase({ type: "none" })
         setConfig((prev) => ({ ...prev, targetDistance: newTargetDistance }))
         // Reset the targetReachedFired flag by resetting + starting fresh
         reset()
         // Small delay so config state propagates before start
         setTimeout(() => start(), 50)
-    }, [stopReplay, reset, start])
+    }, [reset, start])
 
     const handleSaveProgress = useCallback(async (runName: string) => {
         if (!bestCreatureEver) return
@@ -188,8 +211,8 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
                         {isRunning || isPaused ? (
                             <SimulationCanvas
                                 creatures={creatures}
-                                groundY={600}
-                                targetZone={{ x: config.targetDistance, y: 500, width: 100, height: 80 }}
+                                groundY={TRAINING_GROUND_Y}
+                                targetZone={getTrainingTargetZone(config.targetDistance)}
                                 showCount={5}
                                 dimmed={isReplayActive}
                             />
@@ -202,12 +225,15 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
                             </div>
                         )}
 
-                        {/* COD-style replay overlay */}
-                        {isReplayActive && replayPhase.type === "active" && (
+                        {replayPhase.type !== "none" && (
                             <ReplayOverlay
                                 generation={replayPhase.generation}
-                                replayCreature={replayCreature}
+                                topology={topology}
+                                replay={replayData}
+                                replayFrameIndex={replayFrameIndex}
                                 replayProgress={replayProgress}
+                                replayStatus={replayPhase.type}
+                                replayError={replayPhase.type === "error" ? replayPhase.message : undefined}
                                 currentTargetDistance={config.targetDistance}
                                 isSaving={isSaving}
                                 onSaveAndExit={handleSaveAndExit}
@@ -219,6 +245,7 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
                     <div className="h-48 shrink-0 bg-card z-10 w-full flex flex-col">
                         <FitnessChart data={fitnessHistory} />
                     </div>
+
                 </div>
 
                 <TrainingSidebar

@@ -1,6 +1,7 @@
 import type {
     ActiveTrainingBackend,
     Genome,
+    PackedTrainingReplay,
     PackedRenderSnapshot,
     Topology,
     TrainingEngineConfig,
@@ -9,6 +10,8 @@ import type {
     TrainingStageTimings,
 } from "@/core/types"
 import type { EvaluatedGeneration, TrainingBackendEngine } from "./engineBackend"
+import { RustWasmTrainingEngine } from "./RustWasmTrainingEngine"
+import { captureReplayFrames } from "./replayCapture"
 
 interface ShardResponse {
     id: number
@@ -180,6 +183,24 @@ export class MulticoreWasmTrainingEngine implements TrainingBackendEngine {
             bestFitness: Number.isFinite(this.bestFitness) ? this.bestFitness : 0,
             generation: this.generation,
         }
+    }
+
+    async createReplay(genome: Genome): Promise<PackedTrainingReplay> {
+        const replayConfig: TrainingEngineConfig = {
+            ...this.config,
+            backend: this.backend,
+            populationSize: 1,
+            workerCount: 1,
+            backgroundMode: false,
+        }
+        const replayEngine = await RustWasmTrainingEngine.create(
+            this.topology,
+            replayConfig,
+            [genome],
+            genome.generation,
+            this.backend,
+        )
+        return captureReplayFrames(replayEngine, this.topology, replayConfig, genome, this.backend)
     }
 
     private combineEvaluations(responses: ShardResponse[]): void {

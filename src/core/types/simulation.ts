@@ -184,5 +184,6 @@ export interface TrainingHubConfig {
  */
 export type ReplayPhase =
   | { type: 'none' }
+  | { type: 'preparing'; genome: Genome; generation: number }
   | { type: 'active'; genome: Genome; generation: number }
-  | { type: 'completed' }
+  | { type: 'error'; genome: Genome; generation: number; message: string }

@@ -31,6 +31,19 @@ export interface PackedRenderSnapshot {
     centers: Float32Array
 }
 
+export interface PackedTrainingReplay {
+    backend: ActiveTrainingBackend
+    generation: number
+    frameRate: number
+    frameCount: number
+    particleCount: number
+    reachedFrame: number
+    positions: Float32Array
+    centers: Float32Array
+    groundY: number
+    targetZone: { x: number; y: number; width: number; height: number }
+}
+
 export interface TrainingSnapshot {
     phase: TrainingEnginePhase
     generation: number
@@ -75,7 +88,9 @@ export type TrainingEvent =
     | { type: "ready"; snapshot: TrainingSnapshot }
     | { type: "snapshot"; snapshot: TrainingSnapshot }
     | { type: "generation"; generation: number; bestFitness: number; averageFitness: number; bestGenome: Genome }
-    | { type: "targetReached"; genome: Genome; generation: number }
+    | { type: "targetReached"; genome: Genome; generation: number; snapshot: TrainingSnapshot }
+    | { type: "replayReady"; requestId: number; replay: PackedTrainingReplay }
+    | { type: "replayFailed"; requestId: number; message: string }
     | { type: "sessionExported"; requestId: number; state: TrainingEngineState }
     | { type: "backendChanged"; backend: ActiveTrainingBackend; workerCount: number }
     | { type: "paused"; snapshot: TrainingSnapshot }

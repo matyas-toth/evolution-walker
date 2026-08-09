@@ -41,6 +41,9 @@ function emit(event: TrainingEvent): void {
     if ((event.type === "snapshot" || event.type === "ready" || event.type === "paused") && event.snapshot.render) {
         transfer.push(event.snapshot.render.positions.buffer, event.snapshot.render.centers.buffer)
     }
+    if (event.type === "replayReady") {
+        transfer.push(event.replay.positions.buffer, event.replay.centers.buffer)
+    }
     workerScope.postMessage(event, transfer)
 }
 
@@ -265,10 +268,16 @@ async function runChunk(): Promise<void> {
             emitPendingGeneration(true)
             running = false
             phase = "paused"
-            emit({ type: "targetReached", genome: evaluated.targetGenome, generation: evaluated.generation })
-            const pausedSnapshot = engine.getSnapshot(phase, !config.backgroundMode)
-            decorateSnapshot(pausedSnapshot)
-            emit({ type: "paused", snapshot: pausedSnapshot })
+            const victorySnapshot = engine.getSnapshot(phase, false)
+            victorySnapshot.generation = evaluated.generation
+            victorySnapshot.progress = 100
+            decorateSnapshot(victorySnapshot)
+            emit({
+                type: "targetReached",
+                genome: evaluated.targetGenome,
+                generation: evaluated.generation,
+                snapshot: victorySnapshot,
+            })
             return
         }
         phase = "running"
@@ -371,16 +380,20 @@ async function handleCommand(command: TrainingCommand): Promise<void> {
                 emit({ type: "sessionExported", requestId: command.requestId, state: await engine.exportState() })
                 break
             case "requestReplay":
-                emit({
-                    type: "sessionExported",
-                    requestId: command.requestId,
-                    state: engine ? await engine.exportState() : {
-                        population: [command.genome],
-                        bestGenome: command.genome,
-                        bestFitness: 0,
-                        generation: command.genome.generation,
-                    },
-                })
+                if (!engine) {
+                    emit({ type: "replayFailed", requestId: command.requestId, message: "Training engine is not initialized" })
+                    break
+                }
+                try {
+                    const replay = await engine.createReplay(command.genome)
+                    emit({ type: "replayReady", requestId: command.requestId, replay })
+                } catch (replayError) {
+                    emit({
+                        type: "replayFailed",
+                        requestId: command.requestId,
+                        message: replayError instanceof Error ? replayError.message : "Exact replay capture failed",
+                    })
+                }
                 break
             case "dispose":
                 running = false

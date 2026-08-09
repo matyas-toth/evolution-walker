@@ -46,6 +46,7 @@ export type {
   TrainingStageTimings,
   TrainingDiagnostics,
   PackedRenderSnapshot,
+  PackedTrainingReplay,
   TrainingSnapshot,
   TrainingEngineState,
   TrainingEngineConfig,

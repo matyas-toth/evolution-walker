@@ -7,6 +7,7 @@ import { resolveTrainingEngineConfig } from "@/core/training/types"
 import type {
     Creature,
     Genome,
+    PackedTrainingReplay,
     Topology,
     TrainingDiagnostics,
     TrainingEngineState,
@@ -144,11 +145,17 @@ export function useEvolution(props: UseEvolutionProps) {
                 return
             }
             if (event.type === "targetReached") {
+                setPhase("paused")
+                setGeneration(event.snapshot.generation)
+                setProgress(event.snapshot.progress)
+                setDiagnostics(event.snapshot.diagnostics)
+                setPausePending(false)
                 const winner = createCreatureFromTopology(topology, event.genome, { x: 100, y: groundY - 30 })
                 callbackRef.current?.(winner)
                 return
             }
-            if (event.type === "backendChanged" || event.type === "sessionExported") return
+            if (event.type === "backendChanged" || event.type === "sessionExported"
+                || event.type === "replayReady" || event.type === "replayFailed") return
             const snapshot = event.snapshot
             if (event.type === "paused") setPausePending(false)
             startTransition(() => {
@@ -203,6 +210,12 @@ export function useEvolution(props: UseEvolutionProps) {
         return client.exportSession()
     }, [])
 
+    const requestReplay = useCallback(async (genome: Genome): Promise<PackedTrainingReplay> => {
+        const client = clientRef.current
+        if (!client) throw new Error("Training engine is not ready")
+        return client.requestReplay(genome)
+    }, [])
+
     return {
         phase,
         generation,
@@ -217,5 +230,6 @@ export function useEvolution(props: UseEvolutionProps) {
         stop,
         reset,
         exportSession,
+        requestReplay,
     }
 }

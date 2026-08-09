@@ -1,4 +1,4 @@
-import type { Genome, TrainingEngineConfig, TrainingEngineState, TrainingSnapshot } from "@/core/types"
+import type { Genome, PackedTrainingReplay, TrainingEngineConfig, TrainingEngineState, TrainingSnapshot } from "@/core/types"
 
 export interface EvaluatedGeneration {
     generation: number
@@ -20,4 +20,5 @@ export interface TrainingBackendEngine {
     getSnapshot(phase: TrainingSnapshot["phase"], includeRender: boolean): TrainingSnapshot
     getBestGenome(): Genome | null
     exportState(): TrainingEngineState | Promise<TrainingEngineState>
+    createReplay(genome: Genome): Promise<PackedTrainingReplay>
 }

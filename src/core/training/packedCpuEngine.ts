@@ -1,6 +1,8 @@
 import type {
+    ActiveTrainingBackend,
     Genome,
     MuscleGene,
+    PackedTrainingReplay,
     Topology,
     TrainingEngineConfig,
     TrainingEngineState,
@@ -8,6 +10,7 @@ import type {
     TrainingStageTimings,
 } from "@/core/types"
 import type { EvaluatedGeneration, TrainingBackendEngine } from "./engineBackend"
+import { captureReplayFrames } from "./replayCapture"
 
 const FIXED_TIMESTEP = 1 / 60
 const GRAVITY = 200
@@ -127,6 +130,7 @@ function compileTopology(topology: Topology): CompiledTopology {
 
 /** Packed worker-owned CPU engine with persistent arrays and bounded simulation chunks. */
 export class PackedCpuTrainingEngine implements TrainingBackendEngine {
+    private readonly topologyDefinition: Topology
     private readonly topology: CompiledTopology
     private config: TrainingEngineConfig
     private readonly rng: XorShift32
@@ -178,6 +182,7 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
         initialGeneration = 1,
     ) {
         const startedAt = performance.now()
+        this.topologyDefinition = topology
         this.topology = compileTopology(topology)
         this.config = config
         this.populationSize = config.populationSize
@@ -363,6 +368,24 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
             bestFitness: Number.isFinite(this.bestFitness) ? this.bestFitness : 0,
             generation: this.generation,
         }
+    }
+
+    async createReplay(genome: Genome): Promise<PackedTrainingReplay> {
+        const backend: ActiveTrainingBackend = this.config.backend === "legacy" ? "legacy" : "wasm-scalar"
+        const replayConfig: TrainingEngineConfig = {
+            ...this.config,
+            backend,
+            populationSize: 1,
+            workerCount: 1,
+            backgroundMode: false,
+        }
+        const replayEngine = new PackedCpuTrainingEngine(
+            this.topologyDefinition,
+            replayConfig,
+            [genome],
+            genome.generation,
+        )
+        return captureReplayFrames(replayEngine, this.topologyDefinition, replayConfig, genome, backend)
     }
 
     private initializeGenomes(initialPopulation?: Genome[]): void {

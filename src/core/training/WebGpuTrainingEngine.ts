@@ -1,6 +1,7 @@
 import type {
     Genome,
     MuscleGene,
+    PackedTrainingReplay,
     Topology,
     TrainingEngineConfig,
     TrainingEngineState,
@@ -8,6 +9,7 @@ import type {
     TrainingStageTimings,
 } from "@/core/types"
 import type { EvaluatedGeneration, TrainingBackendEngine } from "./engineBackend"
+import { getTrainingTargetZone, TRAINING_FRAME_RATE, TRAINING_GROUND_Y } from "./world"
 
 const GPU_MAP_READ = 0x0001
 const GPU_COPY_SRC = 0x0004
@@ -78,6 +80,7 @@ const TRAINING_SHADER = /* wgsl */ `
 @group(0) @binding(4) var<storage, read_write> metrics: array<f32>;
 @group(0) @binding(5) var<storage, read> params: array<f32>;
 @group(0) @binding(6) var<storage, read_write> oscillators: array<f32>;
+@group(0) @binding(7) var<storage, read_write> replay_positions: array<f32>;
 
 const PI2: f32 = 6.283185307179586;
 const DT: f32 = 0.016666667;
@@ -101,6 +104,7 @@ fn train(@builtin(global_invocation_id) id: vec3<u32>) {
     let state_base = creature * particle_count * 4u;
     let metric_base = creature * 8u;
     let oscillator_base = creature * muscle_count * 4u;
+    let replay_meta_index = (total_steps + 1u) * particle_count * 2u;
 
     if (current_step == 0u) {
         metrics[metric_base + 0u] = spawn_x;
@@ -129,6 +133,15 @@ fn train(@builtin(global_invocation_id) id: vec3<u32>) {
             oscillators[oscillator + 1u] = cos(phase);
             oscillators[oscillator + 2u] = sin(delta);
             oscillators[oscillator + 3u] = cos(delta);
+        }
+        if (params[12] != 0.0 && creature == 0u) {
+            replay_positions[replay_meta_index] = -1.0;
+            for (var particle = 0u; particle < particle_count; particle++) {
+                let state_index = state_base + particle * 4u;
+                let replay_index = particle * 2u;
+                replay_positions[replay_index] = state[state_index];
+                replay_positions[replay_index + 1u] = state[state_index + 1u];
+            }
         }
     }
 
@@ -230,6 +243,19 @@ fn train(@builtin(global_invocation_id) id: vec3<u32>) {
             oscillators[oscillator] = sine * delta_cosine + cosine * delta_sine;
             oscillators[oscillator + 1u] = cosine * delta_cosine - sine * delta_sine;
         }
+        if (params[12] != 0.0 && creature == 0u) {
+            let replay_frame = current_step + local_step + 1u;
+            for (var particle = 0u; particle < particle_count; particle++) {
+                let state_index = state_base + particle * 4u;
+                let replay_index = (replay_frame * particle_count + particle) * 2u;
+                replay_positions[replay_index] = state[state_index];
+                replay_positions[replay_index + 1u] = state[state_index + 1u];
+            }
+            if (metrics[metric_base + 5u] != 0.0 && replay_positions[replay_meta_index] < 0.0) {
+                replay_positions[replay_meta_index] = f32(replay_frame);
+                break;
+            }
+        }
     }
 
     if (current_step + step_count >= total_steps) {
@@ -262,6 +288,10 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
     private readonly paramsBuffer: GpuBufferHandle
     private readonly stateReadBuffer: GpuBufferHandle
     private readonly metricsReadBuffer: GpuBufferHandle
+    private readonly replayPositions: Float32Array
+    private readonly replayPositionsBuffer: GpuBufferHandle
+    private readonly replayPositionsReadBuffer: GpuBufferHandle
+    private readonly replayMode: boolean
     private readonly timings: TrainingStageTimings
     private readonly generationDurations: number[] = []
     private currentStep = 0
@@ -272,7 +302,7 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
     private lastEvaluation: EvaluatedGeneration | null = null
     private deviceLost = false
 
-    static async create(topology: Topology, config: TrainingEngineConfig, initialPopulation?: Genome[], initialGeneration = 1): Promise<WebGpuTrainingEngine> {
+    static async create(topology: Topology, config: TrainingEngineConfig, initialPopulation?: Genome[], initialGeneration = 1, replayMode = false): Promise<WebGpuTrainingEngine> {
         const gpu = (navigator as WorkerGpuNavigator).gpu
         if (!gpu) throw new Error("WebGPU is not exposed in this worker")
         const adapter = await gpu.requestAdapter({ powerPreference: "high-performance" })
@@ -290,15 +320,16 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
             layout: "auto",
             compute: { module, entryPoint: "train" },
         })
-        return new WebGpuTrainingEngine(device, pipeline, topology, config, initialPopulation, initialGeneration)
+        return new WebGpuTrainingEngine(device, pipeline, topology, config, initialPopulation, initialGeneration, replayMode)
     }
 
-    private constructor(device: GpuDeviceHandle, pipeline: { getBindGroupLayout(index: number): unknown }, topology: Topology, config: TrainingEngineConfig, initialPopulation: Genome[] | undefined, initialGeneration: number) {
+    private constructor(device: GpuDeviceHandle, pipeline: { getBindGroupLayout(index: number): unknown }, topology: Topology, config: TrainingEngineConfig, initialPopulation: Genome[] | undefined, initialGeneration: number, replayMode: boolean) {
         const startedAt = performance.now()
         this.device = device
         this.pipeline = pipeline
         this.topology = topology
         this.config = config
+        this.replayMode = replayMode
         this.generation = initialGeneration
         this.muscleIds = topology.muscles.map((muscle) => muscle.id)
         this.random = new SeededRandom(config.seed)
@@ -308,6 +339,9 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
         const particleDefinitions = this.createParticleDefinitions()
         const constraints = this.createConstraints()
         const oscillators = new Float32Array(Math.max(1, config.populationSize * topology.muscles.length * 4))
+        const replayFrameCount = replayMode ? Math.max(2, Math.round(config.generationDuration * TRAINING_FRAME_RATE) + 1) : 1
+        this.replayPositions = new Float32Array(Math.max(1, replayFrameCount * topology.particles.length * 2 + (replayMode ? 1 : 0)))
+        if (replayMode) this.replayPositions[this.replayPositions.length - 1] = -1
         const params = new Float32Array(16)
         this.stateBuffer = this.createBuffer(this.state, GPU_STORAGE | GPU_COPY_SRC)
         const particleBuffer = this.createBuffer(particleDefinitions, GPU_STORAGE)
@@ -316,11 +350,13 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
         this.metricsBuffer = this.createBuffer(this.metrics, GPU_STORAGE | GPU_COPY_SRC)
         this.paramsBuffer = this.createBuffer(params, GPU_STORAGE | GPU_COPY_DST)
         const oscillatorBuffer = this.createBuffer(oscillators, GPU_STORAGE)
+        this.replayPositionsBuffer = this.createBuffer(this.replayPositions, GPU_STORAGE | GPU_COPY_SRC)
         this.stateReadBuffer = device.createBuffer({ size: this.state.byteLength, usage: GPU_MAP_READ | GPU_COPY_DST })
         this.metricsReadBuffer = device.createBuffer({ size: this.metrics.byteLength, usage: GPU_MAP_READ | GPU_COPY_DST })
+        this.replayPositionsReadBuffer = device.createBuffer({ size: this.replayPositions.byteLength, usage: GPU_MAP_READ | GPU_COPY_DST })
         this.bindGroup = device.createBindGroup({
             layout: pipeline.getBindGroupLayout(0),
-            entries: [this.stateBuffer, particleBuffer, constraintBuffer, this.genomeBuffer, this.metricsBuffer, this.paramsBuffer, oscillatorBuffer]
+            entries: [this.stateBuffer, particleBuffer, constraintBuffer, this.genomeBuffer, this.metricsBuffer, this.paramsBuffer, oscillatorBuffer, this.replayPositionsBuffer]
                 .map((buffer, binding) => ({ binding, resource: { buffer } })),
         })
         this.timings = { initializeMs: performance.now() - startedAt, simulationMs: 0, fitnessMs: 0, evolutionMs: 0, resetMs: 0, transferMs: 0, totalGenerationMs: 0 }
@@ -344,6 +380,7 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
             this.topology.constraints.length + this.topology.muscles.length,
             this.topology.muscles.length, stepCount, this.currentStep, totalSteps,
             600, 100, 570, this.config.targetDistance, this.headIndex(),
+            this.replayMode ? 1 : 0,
         ])
         const startedAt = performance.now()
         if (this.currentStep === 0) this.device.queue.writeBuffer(this.genomeBuffer, 0, this.genomes)
@@ -359,6 +396,9 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
         if (shouldReadback) {
             encoder.copyBufferToBuffer(this.stateBuffer, 0, this.stateReadBuffer, 0, this.state.byteLength)
             encoder.copyBufferToBuffer(this.metricsBuffer, 0, this.metricsReadBuffer, 0, this.metrics.byteLength)
+            if (this.replayMode) {
+                encoder.copyBufferToBuffer(this.replayPositionsBuffer, 0, this.replayPositionsReadBuffer, 0, this.replayPositions.byteLength)
+            }
         }
         this.device.queue.submit([encoder.finish()])
         if (shouldReadback) await this.readGenerationBuffers()
@@ -438,6 +478,54 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
         }
     }
 
+    async createReplay(genome: Genome): Promise<PackedTrainingReplay> {
+        const replayConfig: TrainingEngineConfig = {
+            ...this.config,
+            backend: "webgpu",
+            populationSize: 1,
+            workerCount: 1,
+            backgroundMode: false,
+        }
+        const replayEngine = await WebGpuTrainingEngine.create(
+            this.topology,
+            replayConfig,
+            [genome],
+            genome.generation,
+            true,
+        )
+        await replayEngine.runChunk(Math.max(1, Math.round(replayConfig.generationDuration * TRAINING_FRAME_RATE)))
+        const reachedFrame = Math.round(replayEngine.replayPositions[replayEngine.replayPositions.length - 1])
+        if (reachedFrame < 0) throw new Error("webgpu could not reproduce the target contact for the winning genome")
+        const frameCount = reachedFrame + 1
+        const positions = replayEngine.replayPositions.slice(0, frameCount * this.topology.particles.length * 2)
+        const centers = new Float32Array(frameCount * 2)
+        let totalMass = 0
+        for (const particle of this.topology.particles) totalMass += particle.mass
+        for (let frame = 0; frame < frameCount; frame++) {
+            let weightedX = 0
+            let weightedY = 0
+            for (let particle = 0; particle < this.topology.particles.length; particle++) {
+                const source = (frame * this.topology.particles.length + particle) * 2
+                weightedX += positions[source] * this.topology.particles[particle].mass
+                weightedY += positions[source + 1] * this.topology.particles[particle].mass
+            }
+            centers[frame * 2] = totalMass ? weightedX / totalMass : 0
+            centers[frame * 2 + 1] = totalMass ? weightedY / totalMass : 0
+        }
+        return {
+            backend: "webgpu",
+            generation: genome.generation,
+            frameRate: TRAINING_FRAME_RATE,
+            frameCount,
+            particleCount: this.topology.particles.length,
+            reachedFrame,
+            positions,
+            centers,
+            groundY: TRAINING_GROUND_Y,
+            targetZone: getTrainingTargetZone(replayConfig.targetDistance),
+        }
+    }
+
     private createBuffer(data: Float32Array, usage: number): GpuBufferHandle {
         const buffer = this.device.createBuffer({ size: Math.max(4, data.byteLength), usage: usage | GPU_COPY_DST })
         if (data.byteLength) this.device.queue.writeBuffer(buffer, 0, data)
@@ -446,9 +534,19 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
 
     private async readGenerationBuffers(): Promise<void> {
         const startedAt = performance.now()
-        await Promise.all([this.stateReadBuffer.mapAsync(GPU_MAP_READ), this.metricsReadBuffer.mapAsync(GPU_MAP_READ)])
+        await Promise.all([
+            this.stateReadBuffer.mapAsync(GPU_MAP_READ),
+            this.metricsReadBuffer.mapAsync(GPU_MAP_READ),
+            ...(this.replayMode ? [
+                this.replayPositionsReadBuffer.mapAsync(GPU_MAP_READ),
+            ] : []),
+        ])
         this.state.set(new Float32Array(this.stateReadBuffer.getMappedRange()).subarray(0, this.state.length))
         this.metrics.set(new Float32Array(this.metricsReadBuffer.getMappedRange()).subarray(0, this.metrics.length))
+        if (this.replayMode) {
+            this.replayPositions.set(new Float32Array(this.replayPositionsReadBuffer.getMappedRange()).subarray(0, this.replayPositions.length))
+            this.replayPositionsReadBuffer.unmap()
+        }
         this.stateReadBuffer.unmap()
         this.metricsReadBuffer.unmap()
         this.timings.transferMs = performance.now() - startedAt

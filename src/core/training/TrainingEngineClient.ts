@@ -1,5 +1,6 @@
 import type {
     Genome,
+    PackedTrainingReplay,
     Topology,
     TrainingCommand,
     TrainingEngineConfig,
@@ -15,6 +16,10 @@ export class TrainingEngineClient {
     private readonly listeners = new Set<EventListener>()
     private readonly pendingExports = new Map<number, {
         resolve: (state: TrainingEngineState) => void
+        reject: (error: Error) => void
+    }>()
+    private readonly pendingReplays = new Map<number, {
+        resolve: (replay: PackedTrainingReplay) => void
         reject: (error: Error) => void
     }>()
     private requestId = 0
@@ -34,12 +39,22 @@ export class TrainingEngineClient {
                     pending.resolve(event.state)
                 }
             }
+            if (event.type === "replayReady" || event.type === "replayFailed") {
+                const pending = this.pendingReplays.get(event.requestId)
+                if (pending) {
+                    this.pendingReplays.delete(event.requestId)
+                    if (event.type === "replayReady") pending.resolve(event.replay)
+                    else pending.reject(new Error(event.message))
+                }
+            }
             for (const listener of this.listeners) listener(event)
         }
         this.worker.onerror = (event) => {
             const error = new Error(event.message || "Training worker failed")
             for (const pending of this.pendingExports.values()) pending.reject(error)
             this.pendingExports.clear()
+            for (const pending of this.pendingReplays.values()) pending.reject(error)
+            this.pendingReplays.clear()
             const workerEvent: TrainingEvent = { type: "error", message: error.message, recoverable: false }
             for (const listener of this.listeners) listener(workerEvent)
         }
@@ -83,6 +98,14 @@ export class TrainingEngineClient {
         })
     }
 
+    requestReplay(genome: Genome): Promise<PackedTrainingReplay> {
+        const requestId = ++this.requestId
+        return new Promise((resolve, reject) => {
+            this.pendingReplays.set(requestId, { resolve, reject })
+            this.post({ type: "requestReplay", requestId, genome })
+        })
+    }
+
     dispose(): void {
         if (this.disposed) return
         this.post({ type: "dispose" })
@@ -91,6 +114,8 @@ export class TrainingEngineClient {
         const error = new Error("Training engine disposed")
         for (const pending of this.pendingExports.values()) pending.reject(error)
         this.pendingExports.clear()
+        for (const pending of this.pendingReplays.values()) pending.reject(error)
+        this.pendingReplays.clear()
         this.listeners.clear()
     }
 
