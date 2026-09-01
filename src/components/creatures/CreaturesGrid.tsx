@@ -40,6 +40,8 @@ interface CreatureData {
     topology: Topology
     createdAt: string
     updatedAt: string
+    hasReachedTarget?: boolean
+    _count?: { trainingSessions: number }
 }
 
 interface CreaturesGridProps {
@@ -237,7 +239,7 @@ export function CreaturesGrid({ creatures: initial }: CreaturesGridProps) {
                 </div>
             ) : (
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {creatures.map((creature: any) => (
+                    {creatures.map((creature) => (
                         <div
                             key={creature.id}
                             className="group relative flex flex-col rounded-xl border border-border bg-card overflow-hidden transition-colors hover:border-primary/30"
@@ -283,6 +285,8 @@ export function CreaturesGrid({ creatures: initial }: CreaturesGridProps) {
                                         size="icon"
                                         className="h-8 w-8"
                                         onClick={() => router.push(`/dashboard/creatures/${creature.id}/edit`)}
+                                        title="Edit Creature"
+                                        aria-label={`Edit ${creature.name}`}
                                     >
                                         <Pencil className="h-3.5 w-3.5" />
                                     </Button>
@@ -291,6 +295,8 @@ export function CreaturesGrid({ creatures: initial }: CreaturesGridProps) {
                                         size="icon"
                                         className="h-8 w-8 text-destructive hover:text-destructive"
                                         onClick={() => setDeleteTarget(creature)}
+                                        title="Delete Creature"
+                                        aria-label={`Delete ${creature.name}`}
                                     >
                                         <Trash2 className="h-3.5 w-3.5" />
                                     </Button>

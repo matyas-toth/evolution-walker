@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import type { Genome } from "@/core/types/genetics"
 import type { TrainingHubConfig } from "@/core/types/simulation"
+import { Prisma } from "@/generated/prisma"
 
 export interface SaveSessionPayload {
     creatureId: string
@@ -35,9 +36,9 @@ export async function saveTrainingSession(payload: SaveSessionPayload) {
         data: {
             creatureId: payload.creatureId,
             name: payload.name,
-            config: payload.config as any,
-            population: payload.population as any,
-            bestGenome: payload.bestGenome as any,
+            config: payload.config as unknown as Prisma.InputJsonValue,
+            population: payload.population as unknown as Prisma.InputJsonValue,
+            bestGenome: payload.bestGenome as unknown as Prisma.InputJsonValue,
             bestFitness: payload.bestFitness,
             generation: payload.generation,
             reachedTarget: payload.reachedTarget,
@@ -55,6 +56,12 @@ export async function saveTrainingSession(payload: SaveSessionPayload) {
 export async function getTrainingSessions(creatureId: string) {
     const session = await auth()
     if (!session?.user?.id) throw new Error("Unauthorized")
+
+    const creature = await prisma.creature.findFirst({
+        where: { id: creatureId, userId: session.user.id },
+        select: { id: true },
+    })
+    if (!creature) throw new Error("Unauthorized")
 
     return prisma.trainingSession.findMany({
         where: { creatureId },

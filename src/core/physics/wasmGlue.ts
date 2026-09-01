@@ -6,7 +6,7 @@
  * @module core/physics/wasmGlue
  */
 
-import type { Creature, Particle, Constraint, Muscle, Ground, Wall } from '@/core/types';
+import type { Creature, Muscle, Ground, Wall } from '@/core/types';
 
 const PARTICLE_STRIDE = 72; // 9 f64 per particle
 const CONSTRAINT_STRIDE = 80; // 10 f64 per constraint/muscle

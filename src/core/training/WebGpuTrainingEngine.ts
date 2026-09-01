@@ -308,8 +308,8 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
         const adapter = await gpu.requestAdapter({ powerPreference: "high-performance" })
         if (!adapter) throw new Error("No high-performance WebGPU adapter is available")
         const device = await adapter.requestDevice()
-        const module = device.createShaderModule({ code: TRAINING_SHADER })
-        const compilation = await (module as {
+        const shaderModule = device.createShaderModule({ code: TRAINING_SHADER })
+        const compilation = await (shaderModule as {
             getCompilationInfo(): Promise<{ messages: Array<{ type: string; lineNum: number; message: string }> }>
         }).getCompilationInfo()
         const shaderErrors = compilation.messages.filter((message) => message.type === "error")
@@ -318,7 +318,7 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
         }
         const pipeline = await device.createComputePipelineAsync({
             layout: "auto",
-            compute: { module, entryPoint: "train" },
+            compute: { module: shaderModule, entryPoint: "train" },
         })
         return new WebGpuTrainingEngine(device, pipeline, topology, config, initialPopulation, initialGeneration, replayMode)
     }

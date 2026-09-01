@@ -11,7 +11,6 @@ import type { TrainingDiagnostics, TrainingHubConfig } from "@/core/types"
 import { toast } from "sonner"
 
 interface TrainingSidebarProps {
-    creatureId: string
     config: TrainingHubConfig
     onChangeConfig: (config: TrainingHubConfig) => void
     isRunning: boolean
@@ -29,7 +28,6 @@ interface TrainingSidebarProps {
 }
 
 export function TrainingSidebar({
-    creatureId,
     config,
     onChangeConfig,
     isRunning,
@@ -54,15 +52,26 @@ export function TrainingSidebar({
         try {
             await onSaveProgress(runName)
             toast.success("Progress saved successfully.")
-        } catch (error: any) {
-            toast.error(`Error saving progress: ${error.message}`)
+        } catch (error: unknown) {
+            toast.error(`Error saving progress: ${error instanceof Error ? error.message : "Unknown error"}`)
         } finally {
             setSaving(false)
         }
     }
 
     return (
-        <div className="w-72 border-l border-border bg-card h-full flex flex-col hide-scrollbar overflow-y-auto">
+        <div
+            data-testid="training-sidebar"
+            data-stage-initialize-ms={diagnostics.stageTimings.initializeMs}
+            data-stage-simulation-ms={diagnostics.stageTimings.simulationMs}
+            data-stage-fitness-ms={diagnostics.stageTimings.fitnessMs}
+            data-stage-evolution-ms={diagnostics.stageTimings.evolutionMs}
+            data-stage-reset-ms={diagnostics.stageTimings.resetMs}
+            data-stage-transfer-ms={diagnostics.stageTimings.transferMs}
+            data-stage-total-ms={diagnostics.stageTimings.totalGenerationMs}
+            data-dropped-snapshots={diagnostics.droppedSnapshots}
+            className="w-72 border-l border-border bg-card h-full flex flex-col hide-scrollbar overflow-y-auto"
+        >
             <div className="p-4 border-b border-border space-y-4 shrink-0">
                 <div className="flex items-center gap-2">
                     <Brain className="w-5 h-5 text-primary" />
@@ -160,6 +169,7 @@ export function TrainingSidebar({
                     <div className="flex items-center justify-between">
                         <Label>Background Mode</Label>
                         <Switch
+                            aria-label="Background Mode"
                             disabled={isRunning}
                             checked={config.backgroundMode}
                             onCheckedChange={(c) => onChangeConfig({ ...config, backgroundMode: c })}
@@ -194,6 +204,7 @@ export function TrainingSidebar({
                     <div className="space-y-2">
                         <Label>Population Size: {config.populationSize}</Label>
                         <Slider
+                            aria-label="Population Size"
                             disabled={isRunning}
                             min={10} max={2000} step={10}
                             value={[config.populationSize]}
@@ -204,6 +215,7 @@ export function TrainingSidebar({
                     <div className="space-y-2">
                         <Label>Simulation Speed: {config.simulationSpeed}x</Label>
                         <Slider
+                            aria-label="Simulation Speed"
                             disabled={config.backgroundMode}
                             min={0.1} max={100} step={0.1}
                             value={[config.simulationSpeed]}
@@ -214,6 +226,7 @@ export function TrainingSidebar({
                     <div className="space-y-2">
                         <Label>Generation Duration (s): {config.generationDuration}</Label>
                         <Slider
+                            aria-label="Generation Duration"
                             disabled={isRunning}
                             min={3} max={30} step={1}
                             value={[config.generationDuration]}
@@ -224,6 +237,7 @@ export function TrainingSidebar({
                     <div className="space-y-2">
                         <Label>Mutation Rate: {(config.mutationRate * 100).toFixed(0)}%</Label>
                         <Slider
+                            aria-label="Mutation Rate"
                             disabled={isRunning}
                             min={0.01} max={0.5} step={0.01}
                             value={[config.mutationRate]}
@@ -234,6 +248,7 @@ export function TrainingSidebar({
                     <div className="space-y-2">
                         <Label>Mutation Strength: {config.mutationStrength.toFixed(2)}</Label>
                         <Slider
+                            aria-label="Mutation Strength"
                             disabled={isRunning}
                             min={0.05} max={2.0} step={0.05}
                             value={[config.mutationStrength]}
@@ -244,6 +259,7 @@ export function TrainingSidebar({
                     <div className="space-y-2">
                         <Label>Target Distance: {config.targetDistance}</Label>
                         <Slider
+                            aria-label="Target Distance"
                             disabled={isRunning}
                             min={200} max={5000} step={100}
                             value={[config.targetDistance]}

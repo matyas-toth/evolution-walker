@@ -243,7 +243,7 @@ export default function GeneticAlgorithmShowcase() {
             <div className="flex gap-2">
               <Button
                 onClick={() => setIsRunning(!isRunning)}
-                variant={isRunning ? 'secondary' : 'primary'}
+                variant={isRunning ? 'secondary' : 'default'}
               >
                 {isRunning ? 'Pause' : 'Start'}
               </Button>

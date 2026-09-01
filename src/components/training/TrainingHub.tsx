@@ -249,7 +249,6 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
                 </div>
 
                 <TrainingSidebar
-                    creatureId={creatureId}
                     config={config}
                     onChangeConfig={setConfig}
                     isRunning={isRunning}

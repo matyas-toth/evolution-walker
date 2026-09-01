@@ -12,6 +12,9 @@
 
 # testing
 /coverage
+/playwright-report
+/test-results
+/benchmarks/results
 /.agent
 
 # next.js

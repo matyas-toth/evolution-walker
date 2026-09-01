@@ -557,7 +557,7 @@ export default function LearningBasicsShowcase() {
       <div className="absolute top-4 left-4 z-10 space-y-4">
         <Panel title="Learning Basics">
           <div className="space-y-3">
-            <Button onClick={initializePopulation} variant="primary">
+            <Button onClick={initializePopulation} variant="default">
               Run again
             </Button>
             <div className="space-y-1">

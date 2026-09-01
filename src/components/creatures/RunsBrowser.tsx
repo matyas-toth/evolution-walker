@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Trophy, History, Play, Trash2, ArrowUpDown, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -39,32 +39,31 @@ interface RunsBrowserProps {
 }
 
 type SortOption = "fitness" | "generations" | "efficiency" | "newest"
+type TrainingSessionSummary = Awaited<ReturnType<typeof getTrainingSessions>>[number]
 
 export function RunsBrowser({ creatureId, creatureName, open, onOpenChange }: RunsBrowserProps) {
     const router = useRouter()
-    const [sessions, setSessions] = useState<any[]>([])
+    const [sessions, setSessions] = useState<TrainingSessionSummary[]>([])
     const [isLoading, setIsLoading] = useState(false)
     const [sortBy, setSortBy] = useState<SortOption>("fitness")
     const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
     const [isDeleting, setIsDeleting] = useState(false)
 
-    useEffect(() => {
-        if (open) {
-            loadSessions()
-        }
-    }, [open, creatureId])
-
-    const loadSessions = async () => {
+    const loadSessions = useCallback(async () => {
         setIsLoading(true)
         try {
             const data = await getTrainingSessions(creatureId)
             setSessions(data)
-        } catch (error) {
+        } catch {
             toast.error("Failed to load training runs.")
         } finally {
             setIsLoading(false)
         }
-    }
+    }, [creatureId])
+
+    useEffect(() => {
+        if (open) void loadSessions()
+    }, [open, loadSessions])
 
     const handleDelete = async () => {
         if (!deleteTarget) return
@@ -73,7 +72,7 @@ export function RunsBrowser({ creatureId, creatureName, open, onOpenChange }: Ru
             await deleteTrainingSession(deleteTarget)
             setSessions((prev) => prev.filter((s) => s.id !== deleteTarget))
             toast.success("Run deleted.")
-        } catch (error) {
+        } catch {
             toast.error("Failed to delete run.")
         } finally {
             setIsDeleting(false)
@@ -207,6 +206,7 @@ export function RunsBrowser({ creatureId, creatureName, open, onOpenChange }: Ru
                                         size="icon"
                                         className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
                                         onClick={() => setDeleteTarget(session.id)}
+                                        aria-label={`Delete ${session.name || `generation ${session.generation} run`}`}
                                     >
                                         <Trash2 className="w-4 h-4" />
                                     </Button>

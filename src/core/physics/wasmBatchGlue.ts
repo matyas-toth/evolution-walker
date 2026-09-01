@@ -5,7 +5,7 @@
  * @module core/physics/wasmBatchGlue
  */
 
-import type { Creature, Muscle, Ground, Wall } from '@/core/types';
+import type { Creature, Ground, Wall } from '@/core/types';
 import { getPhysicsWasmModule } from './wasmGlue';
 
 const PARTICLE_STRIDE = 72;   // 9 f64 per particle
@@ -177,8 +177,7 @@ function syncToWasm(
 function syncFromWasm(
     view: DataView,
     creatures: Creature[],
-    layout: BatchLayout,
-    headIdx: number
+    layout: BatchLayout
 ): void {
     const { creaturesOffset, metadataOffset, creatureStride,
         numParticles, numConstraintsOnly, numMuscles } = layout;
@@ -302,7 +301,7 @@ export function stepPhysicsBatch(
 
         // Sync all creatures back from WASM
         const viewOut = new DataView(memory.buffer);
-        syncFromWasm(viewOut, creatures, layout, headIdx);
+        syncFromWasm(viewOut, creatures, layout);
 
         return true;
     } catch (e) {

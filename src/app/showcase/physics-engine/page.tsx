@@ -233,7 +233,7 @@ export default function PhysicsEngineShowcase() {
               <div className="flex gap-2">
                 <Button
                   onClick={() => setIsRunning(!isRunning)}
-                  variant={isRunning ? 'secondary' : 'primary'}
+                  variant={isRunning ? 'secondary' : 'default'}
                 >
                   {isRunning ? 'Pause' : 'Start'}
                 </Button>
@@ -244,32 +244,12 @@ export default function PhysicsEngineShowcase() {
               
               {/* Parameters */}
               <div className="space-y-2">
-                <Slider
-                  label="Gravity"
-                  min={0}
-                  max={200}
-                  value={gravity}
-                  onChange={setGravity}
-                  formatValue={(v) => `${v.toFixed(1)} px/s²`}
-                />
-                <Slider
-                  label="Muscle Stiffness"
-                  min={0.1}
-                  max={1}
-                  step={0.05}
-                  value={muscleStiffness}
-                  onChange={setMuscleStiffness}
-                  formatValue={(v) => `${(v * 100).toFixed(0)}%`}
-                />
-                <Slider
-                  label="Ground Friction"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={groundFriction}
-                  onChange={setGroundFriction}
-                  formatValue={(v) => `${(v * 100).toFixed(0)}%`}
-                />
+                <label className="block text-xs">Gravity: {gravity.toFixed(1)} px/s²</label>
+                <Slider min={0} max={200} value={[gravity]} onValueChange={([value]) => setGravity(value)} />
+                <label className="block text-xs">Muscle Stiffness: {(muscleStiffness * 100).toFixed(0)}%</label>
+                <Slider min={0.1} max={1} step={0.05} value={[muscleStiffness]} onValueChange={([value]) => setMuscleStiffness(value)} />
+                <label className="block text-xs">Ground Friction: {(groundFriction * 100).toFixed(0)}%</label>
+                <Slider min={0} max={1} step={0.05} value={[groundFriction]} onValueChange={([value]) => setGroundFriction(value)} />
               </div>
             </div>
           </Panel>

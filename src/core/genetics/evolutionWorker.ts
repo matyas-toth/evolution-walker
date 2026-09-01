@@ -65,7 +65,7 @@ export class EvolutionWorker {
       const workerUrl = this.getWorkerUrl();
       this.worker = new Worker(workerUrl, { type: 'module' });
       this.setupMessageHandler();
-    } catch (error) {
+    } catch {
       // Fallback: create inline worker
       console.warn('Direct worker file not available, using inline worker');
       this.createInlineWorker();

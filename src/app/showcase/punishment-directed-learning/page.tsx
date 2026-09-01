@@ -670,7 +670,7 @@ export default function PunishmentDirectedLearningShowcase() {
       <div className="absolute top-4 left-4 z-10 space-y-4">
         <Panel title="Punishment-Directed Learning">
           <div className="space-y-3">
-            <Button onClick={initializePopulation} variant="primary">
+            <Button onClick={initializePopulation} variant="default">
               Run again
             </Button>
             <div className="space-y-1">

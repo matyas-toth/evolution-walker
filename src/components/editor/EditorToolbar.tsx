@@ -57,7 +57,7 @@ export function EditorToolbar({ tool, onToolChange, onUndo, onRedo, canUndo, can
         }
         window.addEventListener("keydown", handleKey)
         return () => window.removeEventListener("keydown", handleKey)
-    }, [onToolChange, onUndo, onRedo])
+    }, [onToolChange, onUndo, onRedo, isPreviewMode, onTogglePreview])
 
     return (
         <div className="flex flex-col items-center gap-1 p-2 bg-card border border-border rounded-xl">

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import type { Genome } from "@/core/types/genetics"
+import { Prisma } from "@/generated/prisma"
 
 export async function saveGenome(
     creatureId: string,
@@ -36,7 +37,7 @@ export async function saveGenome(
         data: {
             creatureId,
             name,
-            weights: weights as any, // Cast to any for Prisma JSON loosely typed
+            weights: weights as unknown as Prisma.InputJsonValue,
             fitness,
             reachedTarget,
         },
@@ -54,12 +55,16 @@ export async function getGenomes(creatureId: string) {
         throw new Error("Unauthorized")
     }
 
+    const creature = await prisma.creature.findFirst({
+        where: { id: creatureId, userId: session.user.id },
+        select: { id: true },
+    })
+    if (!creature) throw new Error("Unauthorized")
+
     const genomes = await prisma.genome.findMany({
         where: { creatureId },
         orderBy: { fitness: 'desc' },
     })
 
-    // We return weights as any and let the client cast it to Genome.
-    // In a production app, we would validate the JSON shape here with Zod.
     return genomes
 }

@@ -5,7 +5,7 @@
  */
 
 import { Genome, FitnessScore } from '@/core/types';
-import { tournamentSelection, uniformCrossoverWithBias, mutateGenome } from './index';
+import { uniformCrossoverWithBias, mutateGenome } from './index';
 
 // Worker-compatible creature type (minimal, just genome + fitness)
 interface CreatureData {

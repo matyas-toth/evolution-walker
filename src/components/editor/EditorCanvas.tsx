@@ -102,7 +102,17 @@ export function EditorCanvas({
                 isDead: false,
                 currentPos: { x: 0, y: 0 },
                 minHeadY: 0,
-                genome: [],
+                genome: {
+                    id: "preview-genome",
+                    genes: clone.muscles.map(muscle => ({
+                        muscleId: muscle.id,
+                        amplitude: 0.2,
+                        frequency: 2,
+                        phase: 0,
+                    })),
+                    generation: 0,
+                    createdAt: 0,
+                },
                 particleMap: new Map(),
                 startPos: { x: 0, y: 0 },
                 maxDistance: 0,
@@ -413,7 +423,7 @@ export function EditorCanvas({
 
         const hit = hitTest(sx, sy)
         setHovered(hit)
-    }, [tool, hitTest, screenToWorld, onParticleDrag])
+    }, [tool, hitTest, screenToWorld, onParticleDrag, isPreviewMode])
 
     const handleMouseUp = useCallback(() => {
         if (dragRef.current) {

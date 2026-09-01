@@ -15,7 +15,6 @@ export function createDefaultConfig(): SimulationConfig {
   const canvasHeight = typeof window !== 'undefined' ? window.innerHeight : 1080;
   
   const groundY = canvasHeight * 0.8; // Ground at 80% of screen height
-  const startX = canvasWidth * 0.1; // Start at 10% from left
   const targetX = canvasWidth * 0.7; // Target at 70% from left
   
   return {

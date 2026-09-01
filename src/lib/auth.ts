@@ -10,9 +10,6 @@ import { PrismaAdapter } from "@auth/prisma-adapter"
 import bcrypt from "bcryptjs"
 import { z } from "zod"
 import { prisma } from "@/lib/prisma"
-import type { Adapter } from "next-auth/adapters";
-
-
 import { authConfig } from "./auth.config"
 
 class InvalidCredentialsError extends CredentialsSignin {

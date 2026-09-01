@@ -648,4 +648,56 @@ mod tests {
         assert_eq!(engine.best_ever_genome.len(), 3);
         assert_eq!(&engine.genomes[0..3], &engine.last_best_genome);
     }
+
+    #[test]
+    fn malformed_inputs_are_rejected_without_panicking() {
+        assert!(Engine::from_input(&[]).is_none());
+        let mut zero_population = test_input(1, 1, 3);
+        zero_population[0] = 0.0;
+        assert!(Engine::from_input(&zero_population).is_none());
+        let truncated = &test_input(2, 1, 3)[..20];
+        assert!(Engine::from_input(truncated).is_none());
+    }
+
+    #[test]
+    fn locked_particles_remain_fixed_during_simulation() {
+        let mut input = test_input(2, 10, 21);
+        input[18] = 1.0;
+        let mut engine = Engine::from_input(&input).expect("valid locked engine");
+        let initial_x = engine.x[0];
+        let initial_y = engine.y[0];
+        engine.run_steps(10);
+        assert_eq!(engine.x[0], initial_x);
+        assert_eq!(engine.y[0], initial_y);
+    }
+
+    #[test]
+    fn ground_contact_kills_the_head_and_keeps_positions_finite() {
+        let mut engine = test_engine(1, 1, 23);
+        engine.y[0] = engine.ground_y + 10.0;
+        engine.old_y[0] = engine.y[0];
+        engine.run_steps(1);
+        assert_eq!(engine.alive[0], 0);
+        assert!(engine.x.iter().chain(engine.y.iter()).all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn oscillator_recurrence_is_periodically_renormalized() {
+        let mut input = test_input(1, 1024, 25);
+        input[12] = 10_000.0;
+        let mut engine = Engine::from_input(&input).expect("valid long engine");
+        engine.run_steps(1024);
+        let magnitude = (engine.oscillator_sin[0].powi(2) + engine.oscillator_cos[0].powi(2)).sqrt();
+        assert!((magnitude - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn population_slabs_scale_to_supported_sizes() {
+        for population in [1usize, 10, 64, 2_000] {
+            let engine = test_engine(population, 1, 27);
+            assert_eq!(engine.x.len(), population * 2);
+            assert_eq!(engine.genomes.len(), population * 3);
+            assert_eq!(engine.alive.len(), population);
+        }
+    }
 }

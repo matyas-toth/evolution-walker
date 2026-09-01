@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import type { PackedTrainingReplay, Topology } from "@/core/types"
+import { calculateFixedReplayCamera } from "@/core/training/replayCamera"
 
 interface ReplayCanvasProps {
     topology: Topology
@@ -24,49 +25,10 @@ function ReplayCanvas({ topology, replay, frameIndex }: ReplayCanvasProps) {
         () => new Map(topology.particles.map((particle, index) => [particle.id, index])),
         [topology],
     )
-    const courseBounds = useMemo(() => {
-        const zone = replay.targetZone
-        const particleRadius = topology.particles.reduce(
-            (largest, particle) => Math.max(largest, particle.radius ?? 4),
-            4,
-        )
-        let minX = zone.x
-        let maxX = zone.x + zone.width
-        let minY = Math.min(zone.y, replay.groundY)
-        let maxY = Math.max(zone.y + zone.height, replay.groundY)
-
-        for (let offset = 0; offset < replay.positions.length; offset += 2) {
-            const x = replay.positions[offset]
-            const y = replay.positions[offset + 1]
-            minX = Math.min(minX, x - particleRadius)
-            maxX = Math.max(maxX, x + particleRadius)
-            minY = Math.min(minY, y - particleRadius)
-            maxY = Math.max(maxY, y + particleRadius)
-        }
-
-        return { minX, maxX, minY, maxY }
-    }, [replay, topology.particles])
-    const fixedCamera = useMemo(() => {
-        if (size.width <= 0 || size.height <= 0) return null
-
-        const horizontalSpan = Math.max(1, courseBounds.maxX - courseBounds.minX)
-        const horizontalPadding = Math.max(36, horizontalSpan * 0.06)
-        const groundVisualY = size.height * 0.82
-        const horizontalScale = (size.width - 28) / (horizontalSpan + horizontalPadding * 2)
-        const distanceAboveGround = Math.max(1, replay.groundY - courseBounds.minY)
-        const verticalScaleAbove = (groundVisualY - 22) / (distanceAboveGround * 1.1)
-        const distanceBelowGround = Math.max(0, courseBounds.maxY - replay.groundY)
-        const verticalScaleBelow = distanceBelowGround > 0
-            ? (size.height - groundVisualY - 10) / (distanceBelowGround * 1.1)
-            : Number.POSITIVE_INFINITY
-
-        return {
-            cameraCenterX: (courseBounds.minX + courseBounds.maxX) / 2,
-            groundVisualY,
-            horizontalPadding,
-            scale: Math.max(0.01, Math.min(1.25, horizontalScale, verticalScaleAbove, verticalScaleBelow)),
-        }
-    }, [courseBounds, replay.groundY, size])
+    const fixedCamera = useMemo(
+        () => calculateFixedReplayCamera(replay, topology, size),
+        [replay, size, topology],
+    )
 
     useEffect(() => {
         const container = containerRef.current
@@ -100,7 +62,7 @@ function ReplayCanvas({ topology, replay, frameIndex }: ReplayCanvasProps) {
         const safeFrame = Math.max(0, Math.min(frameIndex, replay.frameCount - 1))
         const positionOffset = safeFrame * replay.particleCount * 2
         const zone = replay.targetZone
-        const { cameraCenterX, groundVisualY, horizontalPadding, scale } = fixedCamera
+        const { bounds, cameraCenterX, groundVisualY, horizontalPadding, scale } = fixedCamera
 
         context.save()
         context.translate(size.width / 2, groundVisualY)
@@ -119,8 +81,8 @@ function ReplayCanvas({ topology, replay, frameIndex }: ReplayCanvasProps) {
         context.strokeStyle = "rgba(255, 255, 255, 0.10)"
         context.lineWidth = 2 / scale
         context.beginPath()
-        context.moveTo(courseBounds.minX - horizontalPadding, replay.groundY)
-        context.lineTo(courseBounds.maxX + horizontalPadding, replay.groundY)
+        context.moveTo(bounds.minX - horizontalPadding, replay.groundY)
+        context.lineTo(bounds.maxX + horizontalPadding, replay.groundY)
         context.stroke()
 
         const drawConnection = (p1Id: string, p2Id: string) => {
@@ -163,7 +125,7 @@ function ReplayCanvas({ topology, replay, frameIndex }: ReplayCanvasProps) {
         context.fillStyle = "rgba(255, 255, 255, 0.55)"
         context.font = "10px ui-monospace, monospace"
         context.fillText(`${remaining} units remaining`, 14, 20)
-    }, [courseBounds, fixedCamera, frameIndex, particleIndices, replay, size, topology])
+    }, [fixedCamera, frameIndex, particleIndices, replay, size, topology])
 
     return (
         <div ref={containerRef} className="w-full h-full">

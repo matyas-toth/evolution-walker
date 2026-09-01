@@ -2,7 +2,8 @@ import { notFound, redirect } from "next/navigation"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { TrainingHub } from "@/components/training/TrainingHub"
-import type { Topology } from "@/core/types"
+import { findOwnedTrainingSession } from "@/lib/trainingSessionAccess"
+import type { Genome, Topology, TrainingHubConfig } from "@/core/types"
 
 export default async function TrainCreaturePage({
     params,
@@ -27,16 +28,13 @@ export default async function TrainCreaturePage({
 
     let initialSession = undefined
     if (sessionId) {
-        const ts = await prisma.trainingSession.findUnique({
-            where: { id: sessionId },
-            select: { id: true, config: true, population: true, bestGenome: true, generation: true }
-        })
+        const ts = await findOwnedTrainingSession(sessionId, id, session.user.id)
         if (ts) {
             initialSession = {
                 id: ts.id,
-                config: ts.config as any,
-                population: ts.population as any,
-                bestGenome: ts.bestGenome as any,
+                config: ts.config as unknown as TrainingHubConfig,
+                population: ts.population as unknown as Genome[],
+                bestGenome: ts.bestGenome as unknown as Genome,
                 generation: ts.generation,
             }
         }
@@ -46,7 +44,7 @@ export default async function TrainCreaturePage({
         <TrainingHub
             creatureId={creature.id}
             creatureName={creature.name}
-            topology={creature.topology as any as Topology}
+            topology={creature.topology as unknown as Topology}
             initialSession={initialSession}
         />
     )

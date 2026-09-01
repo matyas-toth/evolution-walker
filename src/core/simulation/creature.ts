@@ -93,7 +93,7 @@ export function createCreatureFromTopology(
   });
 
   // Ensure exactly one head (fallback for older topologies)
-  let headCount = particles.filter(p => p.isHead).length;
+  const headCount = particles.filter(p => p.isHead).length;
   if (headCount === 0) {
       const fallback = particles.find(p => p.id === 'head');
       if (fallback) fallback.isHead = true;

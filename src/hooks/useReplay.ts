@@ -16,6 +16,8 @@ export function useReplay(replay: PackedTrainingReplay | null) {
         if (!replay || replay.reachedFrame < 0) return
 
         let animationFrame = 0
+        const requestFrame = globalThis.requestAnimationFrame
+        const cancelFrame = globalThis.cancelAnimationFrame
         const startedAt = performance.now()
         const motionDurationMs = replay.reachedFrame / replay.frameRate * 1000
         const loopDurationMs = Math.max(1, motionDurationMs + CONTACT_HOLD_MS)
@@ -29,11 +31,11 @@ export function useReplay(replay: PackedTrainingReplay | null) {
             setFrameIndex((current) => current === nextFrame ? current : nextFrame)
             const nextProgress = holding || replay.reachedFrame === 0 ? 1 : nextFrame / replay.reachedFrame
             setReplayProgress((current) => current === nextProgress ? current : nextProgress)
-            animationFrame = requestAnimationFrame(animate)
+            animationFrame = requestFrame(animate)
         }
 
-        animationFrame = requestAnimationFrame(animate)
-        return () => cancelAnimationFrame(animationFrame)
+        animationFrame = requestFrame(animate)
+        return () => cancelFrame(animationFrame)
     }, [replay])
 
     return {

@@ -81,6 +81,9 @@ export function useEvolution(props: UseEvolutionProps) {
     const [error, setError] = useState<string | null>(null)
     const [pausePending, setPausePending] = useState(false)
 
+    // Deliberately memoized by engine configuration fields: callback and
+    // topology changes must not send redundant updateConfig commands.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     const engineConfig = useMemo(() => resolveTrainingEngineConfig(props), [
         props.populationSize,
         props.generationDuration,
@@ -172,7 +175,10 @@ export function useEvolution(props: UseEvolutionProps) {
             client.dispose()
             if (clientRef.current === client) clientRef.current = null
         }
-    }, [applyRenderSnapshot, initialGeneration, initialPopulation, topology])
+    // Configuration changes use updateConfig below; reinitializing here would
+    // reset generation state during live speed/backend changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [applyRenderSnapshot, groundY, initialGeneration, initialPopulation, topology])
 
     useEffect(() => {
         clientRef.current?.updateConfig(engineConfig)

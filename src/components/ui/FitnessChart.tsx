@@ -24,41 +24,6 @@ const PADDING = { top: 20, right: 40, bottom: 40, left: 60 };
  * Shows best fitness value per generation as a line chart
  */
 export function FitnessChart({ data, className = '' }: FitnessChartProps) {
-  if (data.length === 0) {
-    return (
-      <div className={`${className} pointer-events-none`}>
-        <svg
-          width="100%"
-          height={CHART_HEIGHT}
-          viewBox={`0 0 800 ${CHART_HEIGHT}`}
-          className="w-full"
-        >
-          <text
-            x="400"
-            y={CHART_HEIGHT / 2}
-            textAnchor="middle"
-            fill="#888"
-            fontSize="14"
-            fontFamily="sans-serif"
-          >
-            No data yet
-          </text>
-        </svg>
-      </div>
-    );
-  }
-
-  const maxGeneration = Math.max(...data.map((d) => d.generation));
-  const maxFitness = Math.max(...data.map((d) => d.bestFitness));
-  const minFitness = Math.min(...data.map((d) => d.bestFitness));
-  
-  // Add padding to Y-axis range to show negative values and provide visual padding
-  const fitnessRange = maxFitness - minFitness;
-  const yPadding = fitnessRange > 0 ? fitnessRange * 0.1 : Math.abs(minFitness) * 0.1 || 10;
-  const yMin = minFitness - yPadding;
-  const yMax = maxFitness + yPadding;
-  const yRange = yMax - yMin;
-
   const [chartWidth, setChartWidth] = useState(
     typeof window !== 'undefined' ? window.innerWidth : 800
   );
@@ -71,6 +36,27 @@ export function FitnessChart({ data, className = '' }: FitnessChartProps) {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  if (data.length === 0) {
+    return (
+      <div data-testid="fitness-chart" className={`${className} pointer-events-none`}>
+        <svg width="100%" height={CHART_HEIGHT} viewBox={`0 0 800 ${CHART_HEIGHT}`} className="w-full">
+          <text x="400" y={CHART_HEIGHT / 2} textAnchor="middle" fill="#888" fontSize="14" fontFamily="sans-serif">
+            No data yet
+          </text>
+        </svg>
+      </div>
+    );
+  }
+
+  const maxGeneration = Math.max(...data.map((d) => d.generation));
+  const maxFitness = Math.max(...data.map((d) => d.bestFitness));
+  const minFitness = Math.min(...data.map((d) => d.bestFitness));
+  const fitnessRange = maxFitness - minFitness;
+  const yPadding = fitnessRange > 0 ? fitnessRange * 0.1 : Math.abs(minFitness) * 0.1 || 10;
+  const yMin = minFitness - yPadding;
+  const yMax = maxFitness + yPadding;
+  const yRange = yMax - yMin;
 
   const plotWidth = chartWidth - PADDING.left - PADDING.right;
   const plotHeight = CHART_HEIGHT - PADDING.top - PADDING.bottom;
@@ -112,7 +98,7 @@ export function FitnessChart({ data, className = '' }: FitnessChartProps) {
   }
 
   return (
-    <div className={`${className} pointer-events-none`}>
+    <div data-testid="fitness-chart" className={`${className} pointer-events-none`}>
       <svg
         width="100%"
         height={CHART_HEIGHT}
