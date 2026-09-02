@@ -109,7 +109,7 @@ export function PropertiesPanel({
                         />
                     </div>
                     <div className="flex flex-col gap-1.5 pt-1">
-                        <Label className="text-xs text-muted-foreground">Mozgási szerep</Label>
+                        <Label className="text-xs text-muted-foreground">Locomotion Role</Label>
                         <Select
                             value={particle.locomotionRole ?? "auto"}
                             onValueChange={(value) => onUpdateParticle(particle.id, {
@@ -120,14 +120,14 @@ export function PropertiesPanel({
                             <SelectTrigger className="w-full" size="sm"><SelectValue /></SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="auto">Auto</SelectItem>
-                                <SelectItem value="support">Támasz / láb</SelectItem>
-                                <SelectItem value="body">Testpont</SelectItem>
+                                <SelectItem value="support">Support / Leg</SelectItem>
+                                <SelectItem value="body">Body Point</SelectItem>
                             </SelectContent>
                         </Select>
                     </div>
                     {particle.locomotionRole === "support" ? (
                         <NumberField
-                            label="Járáscsoport (opcionális)"
+                            label="Gait Group (optional)"
                             value={particle.gaitGroup ?? 0}
                             onChange={(gaitGroup) => onUpdateParticle(particle.id, { gaitGroup: Math.max(0, Math.round(gaitGroup)) })}
                             min={0}
