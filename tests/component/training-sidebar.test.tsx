@@ -52,7 +52,7 @@ describe("TrainingSidebar", () => {
     const { props } = renderSidebar()
     expect(screen.getByText("legacy")).toBeVisible()
     expect(screen.getByText("12.34 gen/s")).toBeVisible()
-    expect(screen.getByText("100")).toBeVisible()
+    expect(screen.getByText("100 px")).toBeVisible()
     await user.click(screen.getByRole("button", { name: /Start Evolution/i }))
     expect(props.onToggleStart).toHaveBeenCalledOnce()
   })

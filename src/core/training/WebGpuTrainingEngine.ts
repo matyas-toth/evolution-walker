@@ -7,11 +7,12 @@ import type {
     TrainingEngineState,
     TrainingSnapshot,
     TrainingStageTimings,
+    EvolutionPolicyState,
 } from "@/core/types"
 import type { EvaluatedGeneration, TrainingBackendEngine } from "./engineBackend"
 import { getTrainingTargetZone, TRAINING_FRAME_RATE, TRAINING_GROUND_Y } from "./world"
 import { analyzeLocomotion, type LocomotionAnalysis } from "@/core/topology/locomotion"
-import { adaptiveMutation, wrapPhase } from "./evolutionPolicy"
+import { CandidateMetricOffset, CANDIDATE_METRIC_STRIDE, EvolutionPolicyV3 } from "./EvolutionPolicyV3"
 
 const GPU_MAP_READ = 0x0001
 const GPU_COPY_SRC = 0x0004
@@ -104,7 +105,7 @@ fn train(@builtin(global_invocation_id) id: vec3<u32>) {
     let target_distance = params[10];
     let head_index = u32(params[11]);
     let state_base = creature * particle_count * 4u;
-    let metric_base = creature * 14u;
+    let metric_base = creature * 15u;
     let oscillator_base = creature * muscle_count * 4u;
     let replay_meta_index = (total_steps + 1u) * particle_count * 2u;
 
@@ -122,6 +123,8 @@ fn train(@builtin(global_invocation_id) id: vec3<u32>) {
         metrics[metric_base + 10u] = 0.0;
         metrics[metric_base + 11u] = 0.0;
         metrics[metric_base + 12u] = -6.0;
+        metrics[metric_base + 13u] = 0.0;
+        metrics[metric_base + 14u] = -1.0;
         for (var particle = 0u; particle < particle_count; particle++) {
             let state_index = state_base + particle * 4u;
             let definition = particle * 7u;
@@ -225,12 +228,16 @@ fn train(@builtin(global_invocation_id) id: vec3<u32>) {
                 state[index] = radius;
                 state[index + 2u] = radius;
             }
+            if (metrics[metric_base + 5u] == 0.0 && state[index] >= target_distance && state[index] <= target_distance + 100.0 && state[index + 1u] >= ground_y - 100.0 && state[index + 1u] <= ground_y - 20.0) {
+                metrics[metric_base + 5u] = 1.0;
+                metrics[metric_base + 14u] = f32(current_step + local_step);
+            }
             let mass = particle_defs[definition + 2u];
             total_mass += mass;
             weighted_x += state[index] * mass;
             weighted_y += state[index + 1u] * mass;
             let support_group = u32(particle_defs[definition + 6u]);
-            if (support_group > 0u && support_group <= 31u && state[index + 1u] >= maximum_y - 1.0) {
+            if (support_group > 0u && support_group <= 24u && state[index + 1u] >= maximum_y - 1.0) {
                 contact_mask |= 1u << (support_group - 1u);
             }
         }
@@ -248,14 +255,15 @@ fn train(@builtin(global_invocation_id) id: vec3<u32>) {
             metrics[metric_base + 8u] += max(0.0, ground_y - head_y);
             if (contact_mask == 0u) { metrics[metric_base + 9u] += 1.0; }
             let absolute_step = current_step + local_step;
-            if (contact_mask != u32(metrics[metric_base + 11u]) && f32(absolute_step) - metrics[metric_base + 12u] >= 6.0) {
-                if (u32(metrics[metric_base + 11u]) != 0u || contact_mask != 0u) { metrics[metric_base + 10u] += 1.0; }
-                metrics[metric_base + 12u] = f32(absolute_step);
+            if (contact_mask != 0u && (contact_mask & (contact_mask - 1u)) == 0u) {
+                let previous_grounded = u32(metrics[metric_base + 13u]);
+                if (previous_grounded != 0u && previous_grounded != contact_mask && f32(absolute_step) - metrics[metric_base + 12u] >= 6.0) {
+                    metrics[metric_base + 10u] += 1.0;
+                    metrics[metric_base + 12u] = f32(absolute_step);
+                }
+                metrics[metric_base + 13u] = f32(contact_mask);
             }
             metrics[metric_base + 11u] = f32(contact_mask);
-            if (metrics[metric_base + 5u] == 0.0 && center_x >= target_distance && center_x <= target_distance + 100.0 && center_y >= ground_y - 100.0 && center_y <= ground_y - 20.0) {
-                metrics[metric_base + 5u] = 1.0;
-            }
         }
         for (var muscle = 0u; muscle < muscle_count; muscle++) {
             let oscillator = oscillator_base + muscle * 4u;
@@ -327,14 +335,13 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
     private currentStep = 0
     private generation: number
     private generationStartedAt = performance.now()
-    private bestDistanceEver = Number.NEGATIVE_INFINITY
-    private stagnationGenerations = 0
     private bestFitness = Number.NEGATIVE_INFINITY
     private bestGenomeValues: Float32Array | null = null
     private lastEvaluation: EvaluatedGeneration | null = null
     private deviceLost = false
+    private readonly policy: EvolutionPolicyV3
 
-    static async create(topology: Topology, config: TrainingEngineConfig, initialPopulation?: Genome[], initialGeneration = 1, replayMode = false): Promise<WebGpuTrainingEngine> {
+    static async create(topology: Topology, config: TrainingEngineConfig, initialPopulation?: Genome[], initialGeneration = 1, replayMode = false, policyState?: EvolutionPolicyState): Promise<WebGpuTrainingEngine> {
         const gpu = (navigator as WorkerGpuNavigator).gpu
         if (!gpu) throw new Error("WebGPU is not exposed in this worker")
         const adapter = await gpu.requestAdapter({ powerPreference: "high-performance" })
@@ -352,10 +359,10 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
             layout: "auto",
             compute: { module: shaderModule, entryPoint: "train" },
         })
-        return new WebGpuTrainingEngine(device, pipeline, topology, config, initialPopulation, initialGeneration, replayMode)
+        return new WebGpuTrainingEngine(device, pipeline, topology, config, initialPopulation, initialGeneration, replayMode, policyState)
     }
 
-    private constructor(device: GpuDeviceHandle, pipeline: { getBindGroupLayout(index: number): unknown }, topology: Topology, config: TrainingEngineConfig, initialPopulation: Genome[] | undefined, initialGeneration: number, replayMode: boolean) {
+    private constructor(device: GpuDeviceHandle, pipeline: { getBindGroupLayout(index: number): unknown }, topology: Topology, config: TrainingEngineConfig, initialPopulation: Genome[] | undefined, initialGeneration: number, replayMode: boolean, policyState?: EvolutionPolicyState) {
         const startedAt = performance.now()
         this.device = device
         this.pipeline = pipeline
@@ -366,9 +373,15 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
         this.generation = initialGeneration
         this.muscleIds = topology.muscles.map((muscle) => muscle.id)
         this.random = new SeededRandom(config.seed)
+        this.policy = new EvolutionPolicyV3(topology, config, policyState)
+        const restoredChampion = this.policy.getChampionGenome(initialGeneration)
         this.genomes = this.createGenomes(initialPopulation)
+        if (restoredChampion) {
+            this.bestGenomeValues = new Float32Array(restoredChampion.genes.flatMap((gene) => [gene.amplitude, gene.frequency, gene.phase]))
+            this.bestFitness = this.policy.getChampionFitness()
+        }
         this.state = new Float32Array(config.populationSize * topology.particles.length * 4)
-        this.metrics = new Float32Array(config.populationSize * 14)
+        this.metrics = new Float32Array(config.populationSize * 15)
         const particleDefinitions = this.createParticleDefinitions()
         const constraints = this.createConstraints()
         const oscillators = new Float32Array(Math.max(1, config.populationSize * topology.muscles.length * 4))
@@ -396,7 +409,7 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
         void device.lost.then(() => { this.deviceLost = true })
     }
 
-    updateConfig(config: TrainingEngineConfig): void { this.config = config }
+    updateConfig(config: TrainingEngineConfig): void { this.config = config; this.policy.updateConfig(config) }
     getGeneration(): number { return this.generation }
     getProgress(): number { return this.currentStep / Math.max(1, Math.round(this.config.generationDuration * 60)) * 100 }
 
@@ -444,55 +457,70 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
 
     finishGeneration(): EvaluatedGeneration {
         const startedAt = performance.now()
-        let bestIndex = 0
-        let bestFitness = Number.NEGATIVE_INFINITY
-        let totalFitness = 0
-        let targetIndex = -1
-        for (let creature = 0; creature < this.config.populationSize; creature++) {
-            const fitness = this.metrics[creature * 14 + 6]
-            totalFitness += fitness
-            if (fitness > bestFitness) { bestFitness = fitness; bestIndex = creature }
-            if (targetIndex < 0 && this.metrics[creature * 14 + 5] !== 0) targetIndex = creature
-        }
+        const evaluatedGeneration = this.generation
         const stride = this.muscleIds.length * 3
-        const bestValues = this.genomes.slice(bestIndex * stride, (bestIndex + 1) * stride)
-        const targetValues = targetIndex >= 0
-            ? this.genomes.slice(targetIndex * stride, (targetIndex + 1) * stride)
-            : null
-        if (bestFitness > this.bestFitness) { this.bestFitness = bestFitness; this.bestGenomeValues = bestValues.slice() }
-        const bestDistance = Math.max(...Array.from({ length: this.config.populationSize }, (_, index) =>
-            Math.max(0, this.metrics[index * 14 + 2] - 100),
-        ))
-        this.updateStagnation(bestDistance)
+        const population = Array.from({ length: this.config.populationSize }, (_, creature) =>
+            this.materializeGenome(
+                this.genomes.slice(creature * stride, (creature + 1) * stride),
+                `genome-${evaluatedGeneration}-${creature}`,
+                evaluatedGeneration,
+            ),
+        )
+        const values = new Float32Array(this.config.populationSize * CANDIDATE_METRIC_STRIDE)
+        const totalSteps = Math.max(1, Math.round(this.config.generationDuration * 60))
+        for (let creature = 0; creature < this.config.populationSize; creature++) {
+            const source = creature * 15
+            const target = creature * CANDIDATE_METRIC_STRIDE
+            values[target + CandidateMetricOffset.finalCenterX] = this.metrics[source]
+            values[target + CandidateMetricOffset.maxCenterX] = this.metrics[source + 2]
+            values[target + CandidateMetricOffset.aliveFrames] = this.metrics[source + 7]
+            values[target + CandidateMetricOffset.totalFrames] = totalSteps
+            values[target + CandidateMetricOffset.headHeightSum] = this.metrics[source + 8]
+            values[target + CandidateMetricOffset.initialStandingHeight] = this.locomotion.initialStandingHeight
+            values[target + CandidateMetricOffset.airborneFrames] = this.metrics[source + 9]
+            values[target + CandidateMetricOffset.alternatingTransitions] = this.metrics[source + 10]
+            values[target + CandidateMetricOffset.reachedTarget] = this.metrics[source + 5]
+            values[target + CandidateMetricOffset.firstContactStep] = this.metrics[source + 14]
+        }
+        const result = this.policy.evaluateAndEvolve(population, { populationSize: population.length, values }, evaluatedGeneration)
+        const { bestIndex, targetIndex } = result
+        this.bestFitness = Math.max(this.bestFitness, result.bestFitness)
+        this.bestGenomeValues = new Float32Array(result.championGenome.genes.flatMap((gene) => [gene.amplitude, gene.frequency, gene.phase]))
         this.timings.fitnessMs = performance.now() - startedAt
         const evolutionStarted = performance.now()
-        this.evolve()
+        this.installPopulation(result.genomes)
         this.timings.evolutionMs = performance.now() - evolutionStarted
         this.timings.resetMs = 0
         this.timings.totalGenerationMs = performance.now() - this.generationStartedAt
         this.generationDurations.push(this.timings.totalGenerationMs)
         if (this.generationDurations.length > 30) this.generationDurations.shift()
-        const evaluatedGeneration = this.generation
         this.generation++
         this.currentStep = 0
         this.generationStartedAt = performance.now()
         this.lastEvaluation = {
             generation: evaluatedGeneration,
-            bestFitness,
-            averageFitness: totalFitness / this.config.populationSize,
+            bestFitness: result.bestFitness,
+            averageFitness: result.averageFitness,
             bestIndex,
             targetIndex,
-            bestGenome: this.materializeGenome(bestValues, `genome-${evaluatedGeneration}-best`, evaluatedGeneration),
-            targetGenome: targetValues ? this.materializeGenome(targetValues, `genome-${evaluatedGeneration}-target`, evaluatedGeneration) : null,
-            bestDistance: Math.max(0, this.metrics[bestIndex * 14 + 2] - 100),
-            bestProgress: Math.max(0, this.metrics[bestIndex * 14 + 2] - 100) / Math.max(1, this.config.targetDistance - 100),
-            bestSurvival: this.metrics[bestIndex * 14 + 7] / Math.max(1, Math.round(this.config.generationDuration * 60)),
-            bestSupportTransitions: this.metrics[bestIndex * 14 + 10],
+            bestGenome: population[bestIndex],
+            targetGenome: targetIndex >= 0 ? population[targetIndex] : null,
+            bestDistance: result.bestDistance,
+            medianDistance: result.medianDistance,
+            p90Distance: result.p90Distance,
+            bestGaitQuality: result.bestGaitQuality,
+            archiveCoverage: result.archiveCoverage,
+            genomeDiversity: result.genomeDiversity,
+            stagnationGenerations: result.stagnationGenerations,
+            bestProgress: result.bestDistance / Math.max(1, this.config.targetDistance - 100),
+            bestSurvival: result.scores[bestIndex].survival,
+            bestSupportTransitions: result.scores[bestIndex].alternatingTransitions,
         }
         return this.lastEvaluation
     }
 
     getSnapshot(phase: TrainingSnapshot["phase"], includeRender: boolean): TrainingSnapshot {
+        const policyDiagnostics = this.policy.getDiagnostics()
         const averageDuration = this.generationDurations.length ? this.generationDurations.reduce((sum, value) => sum + value, 0) / this.generationDurations.length : 0
         return {
             phase, generation: this.generation, progress: Math.round(this.getProgress()),
@@ -503,6 +531,14 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
                 generationsPerSecond: averageDuration ? 1000 / averageDuration : 0,
                 stageTimings: { ...this.timings }, droppedSnapshots: 0,
                 memoryBytes: this.state.byteLength + this.metrics.byteLength + this.genomes.byteLength,
+                policyVersion: 3,
+                bestDistance: this.lastEvaluation?.bestDistance ?? policyDiagnostics.bestDistance,
+                medianDistance: this.lastEvaluation?.medianDistance,
+                p90Distance: this.lastEvaluation?.p90Distance,
+                bestGaitQuality: this.lastEvaluation?.bestGaitQuality,
+                archiveCoverage: this.lastEvaluation?.archiveCoverage ?? policyDiagnostics.archiveCoverage,
+                genomeDiversity: this.lastEvaluation?.genomeDiversity,
+                stagnationGenerations: this.lastEvaluation?.stagnationGenerations ?? policyDiagnostics.stagnationGenerations,
             },
             render: includeRender ? this.createRenderSnapshot(5) : undefined,
         }
@@ -517,6 +553,7 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
         return {
             population: Array.from({ length: this.config.populationSize }, (_, creature) => this.materializeGenome(this.genomes.slice(creature * stride, (creature + 1) * stride), `genome-${this.generation}-${creature}`, this.generation)),
             bestGenome: this.getBestGenome(), bestFitness: Number.isFinite(this.bestFitness) ? this.bestFitness : 0, generation: this.generation,
+            policyState: this.policy.exportState(),
         }
     }
 
@@ -626,54 +663,15 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
 
     private headIndex(): number { return Math.max(0, this.topology.particles.findIndex((particle) => particle.isHead || particle.id === "head")) }
 
-    private evolve(): void {
-        const population = this.config.populationSize
-        const stride = this.muscleIds.length * 3
-        const ranked = Array.from({ length: population }, (_, index) => index).sort((left, right) => this.metrics[right * 14 + 6] - this.metrics[left * 14 + 6])
-        const parentCount = Math.max(1, Math.min(population, Math.floor(population * this.config.parentsTopPercent)))
-        const next = new Float32Array(this.genomes.length)
-        const tournament = () => {
-            let best = ranked[Math.floor(this.random.next() * parentCount)]
-            for (let round = 1; round < 3; round++) { const candidate = ranked[Math.floor(this.random.next() * parentCount)]; if (this.metrics[candidate * 14 + 6] > this.metrics[best * 14 + 6]) best = candidate }
-            return best
-        }
-        const adaptive = adaptiveMutation(this.config.mutationRate, this.config.mutationStrength, this.stagnationGenerations)
-        const immigrantCount = adaptive.injectImmigrants ? Math.max(1, Math.floor(population * 0.05)) : 0
-        for (let child = 0; child < population; child++) {
-            if (child < Math.min(population, this.config.elitismCount)) { const source = ranked[child]; next.set(this.genomes.subarray(source * stride, (source + 1) * stride), child * stride); continue }
-            if (child >= population - immigrantCount) { this.seedRhythmicGenome(next, child * stride); continue }
-            const parent1 = tournament(); const parent2 = tournament(); const bias = this.metrics[parent1 * 14 + 6] >= this.metrics[parent2 * 14 + 6] ? 0.6 : 0.4
-            for (let muscle = 0; muscle < this.muscleIds.length; muscle++) {
-                const source = this.random.next() < bias ? parent1 : parent2
-                const sourceBase = source * stride + muscle * 3
-                const targetBase = child * stride + muscle * 3
-                let amplitude = this.genomes[sourceBase], frequency = this.genomes[sourceBase + 1], phase = this.genomes[sourceBase + 2]
-                if (this.random.next() <= adaptive.rate) {
-                    amplitude = Math.max(0.05, Math.min(0.8, amplitude + (this.random.next() - 0.5) * 0.4 * adaptive.strength))
-                    frequency = Math.max(0.1, Math.min(5, frequency + (this.random.next() - 0.5) * 2 * adaptive.strength))
-                    phase = wrapPhase(phase + (this.random.next() - 0.5) * 2 * Math.PI * adaptive.strength)
-                }
-                next[targetBase] = amplitude; next[targetBase + 1] = frequency; next[targetBase + 2] = phase
+    private installPopulation(population: Genome[]): void {
+        let cursor = 0
+        for (const genome of population) {
+            for (const muscleId of this.muscleIds) {
+                const gene = genome.genes.find((candidate) => candidate.muscleId === muscleId)
+                this.genomes[cursor++] = gene?.amplitude ?? 0.1
+                this.genomes[cursor++] = gene?.frequency ?? 1
+                this.genomes[cursor++] = gene?.phase ?? 0
             }
-        }
-        this.genomes.set(next)
-    }
-
-    private updateStagnation(bestDistance: number): void {
-        const threshold = Math.max(1, this.config.targetDistance - 100) * 0.0025
-        if (bestDistance >= this.bestDistanceEver + threshold) { this.bestDistanceEver = bestDistance; this.stagnationGenerations = 0 }
-        else this.stagnationGenerations++
-    }
-
-    private seedRhythmicGenome(target: Float32Array, offset: number): void {
-        const tempo = 0.7 + this.random.next() * 0.8
-        const groupCount = Math.max(1, this.locomotion.supportGroups.length)
-        for (let muscle = 0; muscle < this.muscleIds.length; muscle++) {
-            const group = this.locomotion.muscleGroups[muscle]
-            const base = offset + muscle * 3
-            target[base] = group >= 0 ? 0.18 + this.random.next() * 0.34 : 0.05 + this.random.next() * 0.15
-            target[base + 1] = Math.max(0.1, Math.min(5, tempo + (this.random.next() - 0.5) * 0.12))
-            target[base + 2] = wrapPhase((group >= 0 ? Math.PI * 2 * group / groupCount : 0) + (this.random.next() - 0.5) * 0.24)
         }
     }
 
@@ -683,12 +681,12 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
     }
 
     private createRenderSnapshot(maximum: number): TrainingSnapshot["render"] {
-        const ranked = Array.from({ length: this.config.populationSize }, (_, index) => index).sort((left, right) => this.metrics[right * 14] - this.metrics[left * 14])
+        const ranked = Array.from({ length: this.config.populationSize }, (_, index) => index).sort((left, right) => this.metrics[right * 15] - this.metrics[left * 15])
         const creatureCount = Math.min(maximum, this.config.populationSize)
         const particleCount = this.topology.particles.length
         const positions = new Float32Array(creatureCount * particleCount * 2)
         const centers = new Float32Array(creatureCount * 2)
-        for (let output = 0; output < creatureCount; output++) { const creature = ranked[output]; centers[output * 2] = this.metrics[creature * 14]; centers[output * 2 + 1] = this.metrics[creature * 14 + 1]; for (let particle = 0; particle < particleCount; particle++) { const source = (creature * particleCount + particle) * 4; const target = (output * particleCount + particle) * 2; positions[target] = this.state[source]; positions[target + 1] = this.state[source + 1] } }
+        for (let output = 0; output < creatureCount; output++) { const creature = ranked[output]; centers[output * 2] = this.metrics[creature * 15]; centers[output * 2 + 1] = this.metrics[creature * 15 + 1]; for (let particle = 0; particle < particleCount; particle++) { const source = (creature * particleCount + particle) * 4; const target = (output * particleCount + particle) * 2; positions[target] = this.state[source]; positions[target + 1] = this.state[source + 1] } }
         return { creatureCount, particleCount, positions, centers }
     }
 }

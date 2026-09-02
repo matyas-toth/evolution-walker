@@ -25,11 +25,11 @@ coordinator Web Worker
         |
         +-- packed TypeScript CPU fallback
         +-- Rust/WASM scalar
-        +-- Rust/WASM SIMD + worker islands
+        +-- Rust/WASM SIMD evaluation shards + global selection
         `-- WebGPU compute shader
 ```
 
-The deployable Rust artifacts are committed as `public/training-engine-scalar.wasm` and `public/training-engine-simd.wasm`. Saved sessions store JSON genomes and `TrainingHubConfig`; live physics slabs stay worker-local. New and resumed sessions use `evolutionPolicyVersion: 2`. Old session JSON remains loadable and its population is preserved.
+The deployable Rust artifacts are committed as `public/training-engine-scalar.wasm` and `public/training-engine-simd.wasm`. Saved sessions store JSON genomes, `TrainingHubConfig`, and optional policy-v3 archive/RNG state; live physics slabs stay worker-local. Older policy-v2 sessions are upgraded without resetting their generation or population, and their saved champion is inserted for re-evaluation.
 
 ## Prerequisites
 
@@ -97,7 +97,7 @@ The Training Hub chooses a backend automatically, or you can force `webgpu`, `wa
 
 Fresh training and reset use the gait-aware seed population. Loading a saved session never replaces its genomes. Switching compute backend exports and imports the current population, then replays the partial generation so visible progress is retained.
 
-The fitness chart intentionally keeps its original data format. Policy-v1 and policy-v2 raw fitness values are not directly comparable; compare normalized distance-to-target progress in benchmarks.
+The progress chart reports all-time best sustained distance, generation p90 distance, generation median distance, and the target reference. Policy-v2 and policy-v3 compatibility fitness values are not directly comparable; use sustained distance and fixed-budget quality benchmarks instead.
 
 ## Commands and tests
 
@@ -111,22 +111,22 @@ The fitness chart intentionally keeps its original data format. Policy-v1 and po
 | `npm run test:integration` | Prisma/API tests in disposable MariaDB 11.4 |
 | `npm run test:e2e` | Chromium journeys with disposable MariaDB |
 | `npm run test:coverage` | V8 coverage report and thresholds |
-| `npm run test:quality` | Fixed 5-seed locomotion gate; set `RUN_QUALITY_BENCHMARK=1` to execute the long run |
+| `npm run test:quality` | Fast deterministic policy-v3 locomotion gate |
+| `npm run test:quality:statistical` | Explicit long-running statistical locomotion gate |
 | `npm run test:benchmark` | Production build plus backend benchmark matrix |
 | `npm run verify:fast` | Docker-free lint, types, unit, component, and Rust checks |
 | `npm run verify` | Full correctness gate including build, integration, and E2E |
 
 Integration and E2E scripts create an isolated `evolution_test` database through Testcontainers. They refuse to use a URL without that database name and stop the container in `finally`, so the development database is not touched.
 
-### Fixed quality benchmark
+### Quality benchmarks
 
-The locomotion acceptance run uses five seeds, population 500, 10 simulated seconds per generation, target distance 1400, and a maximum of 400 generations. Track normalized best progress, top-five survival/support transitions, meaningful improvement intervals, and generation throughput. Hardware-specific throughput results belong in `benchmarks/results/` and are gitignored.
+`test:quality` is a small deterministic PR smoke gate. The explicit statistical command runs the long fixed-seed locomotion acceptance workload; hardware-specific throughput results belong in `benchmarks/results/` and are gitignored.
 
 Run the long deterministic gate explicitly:
 
-```powershell
-$env:RUN_QUALITY_BENCHMARK = "1"
-npm run test:quality
+```bash
+npm run test:quality:statistical
 ```
 
 See `tests/README.md` and `benchmarks/README.md` for suite layout and environment filters.

@@ -29,6 +29,10 @@ export interface FitnessDataPoint {
     generation: number
     bestFitness: number
     averageFitness: number
+    bestDistance?: number
+    medianDistance?: number
+    p90Distance?: number
+    bestGaitQuality?: number
 }
 
 const EMPTY_DIAGNOSTICS: TrainingDiagnostics = {
@@ -138,6 +142,10 @@ export function useEvolution(props: UseEvolutionProps) {
                     generation: event.generation,
                     bestFitness: event.bestFitness,
                     averageFitness: event.averageFitness,
+                    bestDistance: event.bestDistance,
+                    medianDistance: event.medianDistance,
+                    p90Distance: event.p90Distance,
+                    bestGaitQuality: event.bestGaitQuality,
                 }))
                 setBestCreatureEver((previous) => {
                     if (previous && (previous.fitness?.total ?? Number.NEGATIVE_INFINITY) >= event.bestFitness) return previous

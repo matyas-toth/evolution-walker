@@ -84,8 +84,8 @@ export function TrainingSidebar({
                         <div className="font-mono text-lg font-bold">{generation}</div>
                     </div>
                     <div className="bg-muted p-2 rounded-lg text-center">
-                        <div className="text-muted-foreground mb-1">Max Fitness</div>
-                        <div className="font-mono text-lg font-bold text-primary">{bestFitness.toFixed(0)}</div>
+                        <div className="text-muted-foreground mb-1">Best Distance</div>
+                        <div className="font-mono text-lg font-bold text-primary">{(diagnostics.bestDistance ?? bestFitness).toFixed(0)} px</div>
                     </div>
                 </div>
 
@@ -135,6 +135,26 @@ export function TrainingSidebar({
                             <div>
                                 <div className="text-muted-foreground">Pause ack</div>
                                 <div className="font-mono">{pausePending ? "pending" : "ready"}</div>
+                            </div>
+                            <div>
+                                <div className="text-muted-foreground">Policy</div>
+                                <div className="font-mono">v{diagnostics.policyVersion ?? config.evolutionPolicyVersion ?? 3}</div>
+                            </div>
+                            <div>
+                                <div className="text-muted-foreground">Gait quality</div>
+                                <div className="font-mono">{((diagnostics.bestGaitQuality ?? 0) * 100).toFixed(0)}%</div>
+                            </div>
+                            <div>
+                                <div className="text-muted-foreground">Archive coverage</div>
+                                <div className="font-mono">{((diagnostics.archiveCoverage ?? 0) * 100).toFixed(1)}%</div>
+                            </div>
+                            <div>
+                                <div className="text-muted-foreground">Genome diversity</div>
+                                <div className="font-mono">{(diagnostics.genomeDiversity ?? 0).toFixed(3)}</div>
+                            </div>
+                            <div>
+                                <div className="text-muted-foreground">Stagnation</div>
+                                <div className="font-mono">{diagnostics.stagnationGenerations ?? 0} gen</div>
                             </div>
                         </>
                     ) : null}

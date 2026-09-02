@@ -22,6 +22,38 @@ export interface TrainingDiagnostics {
     stageTimings: TrainingStageTimings
     droppedSnapshots: number
     memoryBytes: number
+    policyVersion?: number
+    bestDistance?: number
+    medianDistance?: number
+    p90Distance?: number
+    bestGaitQuality?: number
+    archiveCoverage?: number
+    genomeDiversity?: number
+    stagnationGenerations?: number
+}
+
+export interface EvolutionArchiveEntry {
+    cell: number
+    genome: number[]
+    sustainedDistance: number
+    gaitQuality: number
+    reachedTarget: boolean
+}
+
+export interface EvolutionPolicyState {
+    version: 3
+    rngState: number
+    stagnationGenerations: number
+    bestSustainedDistance: number
+    archiveCursor: number
+    archive: EvolutionArchiveEntry[]
+    champion?: EvolutionArchiveEntry
+}
+
+/** Ten f32 values per candidate; see CandidateMetricOffset. */
+export interface PackedCandidateMetrics {
+    populationSize: number
+    values: Float32Array
 }
 
 export interface PackedRenderSnapshot {
@@ -59,6 +91,7 @@ export interface TrainingEngineState {
     bestGenome: Genome | null
     bestFitness: number
     generation: number
+    policyState?: EvolutionPolicyState
 }
 
 export interface TrainingEngineConfig extends TrainingHubConfig {
@@ -87,7 +120,7 @@ export type TrainingCommand =
 export type TrainingEvent =
     | { type: "ready"; snapshot: TrainingSnapshot }
     | { type: "snapshot"; snapshot: TrainingSnapshot }
-    | { type: "generation"; generation: number; bestFitness: number; averageFitness: number; bestGenome: Genome }
+    | { type: "generation"; generation: number; bestFitness: number; averageFitness: number; bestGenome: Genome; bestDistance?: number; medianDistance?: number; p90Distance?: number; bestGaitQuality?: number }
     | { type: "targetReached"; genome: Genome; generation: number; snapshot: TrainingSnapshot }
     | { type: "replayReady"; requestId: number; replay: PackedTrainingReplay }
     | { type: "replayFailed"; requestId: number; message: string }
@@ -111,6 +144,7 @@ export function resolveTrainingEngineConfig(config: TrainingHubConfig): Training
         seed: config.seed ?? 0x6d2b79f5,
         workerCount: config.workerCount ?? "auto",
         snapshotHz: Math.max(1, Math.min(30, config.snapshotHz ?? 5)),
-        evolutionPolicyVersion: 2,
+        evolutionPolicyVersion: 3,
+        policyState: config.policyState,
     }
 }

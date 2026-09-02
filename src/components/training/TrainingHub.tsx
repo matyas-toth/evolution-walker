@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, useEffect } from "react"
+import { useState, useCallback, useEffect, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { ArrowLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -32,7 +32,7 @@ interface TrainingHubProps {
 
 /** Derives initial config state from an optional saved session or sensible defaults. */
 function resolveInitialConfig(session?: SerializedSession): TrainingHubConfig {
-    if (session?.config) return { ...session.config, evolutionPolicyVersion: 2 }
+    if (session?.config) return { ...session.config, evolutionPolicyVersion: 3 }
     return {
         populationSize: 500,
         generationDuration: 10,
@@ -47,7 +47,7 @@ function resolveInitialConfig(session?: SerializedSession): TrainingHubConfig {
         seed: 0x6d2b79f5,
         workerCount: "auto",
         snapshotHz: 5,
-        evolutionPolicyVersion: 2,
+        evolutionPolicyVersion: 3,
     }
 }
 
@@ -84,10 +84,14 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
         setReplayPhase({ type: "preparing", genome: winner.genome, generation: winner.genome.generation })
     }, [])
 
+    const restoredPopulation = useMemo(() => initialSession
+        ? [initialSession.bestGenome, ...initialSession.population.filter((genome) => genome.id !== initialSession.bestGenome.id)]
+            .slice(0, initialSession.config.populationSize)
+        : undefined, [initialSession])
     const evolutionProps: UseEvolutionProps = {
         ...config,
         topology,
-        initialPopulation: initialSession?.population,
+        initialPopulation: restoredPopulation,
         initialGeneration: initialSession?.generation,
         onTargetReached: handleTargetReached,
     }
@@ -148,10 +152,10 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
             await saveTrainingSession({
                 creatureId,
                 name: runName || `Gen ${generation} — Target Reached`,
-                config,
+                config: { ...config, policyState: engineState.policyState },
                 population: engineState.population,
                 bestGenome: replayPhase.genome,
-                bestFitness: bestCreatureEver?.fitness?.total ?? 0,
+                bestFitness: engineState.bestFitness,
                 generation,
                 reachedTarget: true,
             })
@@ -162,7 +166,7 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
         } finally {
             setIsSaving(false)
         }
-    }, [replayPhase, creatureId, config, generation, bestCreatureEver, exportSession, router])
+    }, [replayPhase, creatureId, config, generation, exportSession, router])
 
     const handleContinue = useCallback((newTargetDistance: number) => {
         setReplayData(null)
@@ -177,13 +181,14 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
     const handleSaveProgress = useCallback(async (runName: string) => {
         if (!bestCreatureEver) return
         const engineState = await exportSession()
+        if (!engineState.bestGenome) throw new Error("No evaluated champion is available yet")
         await saveTrainingSession({
             creatureId,
             name: runName || `Gen ${generation}`,
-            config,
+            config: { ...config, policyState: engineState.policyState },
             population: engineState.population,
-            bestGenome: bestCreatureEver.genome,
-            bestFitness: bestCreatureEver.fitness?.total ?? 0,
+            bestGenome: engineState.bestGenome,
+            bestFitness: engineState.bestFitness,
             generation,
             reachedTarget: false,
         })
@@ -244,7 +249,7 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
                     </div>
 
                     <div className="h-48 shrink-0 bg-card z-10 w-full flex flex-col">
-                        <FitnessChart data={fitnessHistory} />
+                        <FitnessChart data={fitnessHistory} targetDistance={Math.max(0, config.targetDistance - 100)} />
                     </div>
 
                 </div>

@@ -53,6 +53,7 @@ struct Engine {
     old_y: Vec<f32>,
     alive: Vec<u8>,
     reached: Vec<u8>,
+    first_contact_step: Vec<i32>,
     center_x: Vec<f32>,
     center_y: Vec<f32>,
     max_distance: Vec<f32>,
@@ -64,6 +65,8 @@ struct Engine {
     support_transitions: Vec<u16>,
     support_contact_mask: Vec<u32>,
     last_support_transition_step: Vec<i32>,
+    last_grounded_group: Vec<i16>,
+    evaluation_metrics: Vec<f32>,
     fitness: Vec<f32>,
     oscillator_sin: Vec<f32>,
     oscillator_cos: Vec<f32>,
@@ -103,7 +106,7 @@ impl Engine {
                 mass: input[cursor + 2].max(0.0001),
                 radius: input[cursor + 3],
                 locked: input[cursor + 4] != 0.0,
-                support_group: input[cursor + 6].max(0.0).min(31.0) as u8,
+                support_group: input[cursor + 6].max(0.0).min(24.0) as u8,
             });
             if input[cursor + 5] != 0.0 {
                 head_index = index;
@@ -161,6 +164,7 @@ impl Engine {
             old_y: vec![0.0; particle_len],
             alive: vec![1; population],
             reached: vec![0; population],
+            first_contact_step: vec![-1; population],
             center_x: vec![0.0; population],
             center_y: vec![0.0; population],
             max_distance: vec![0.0; population],
@@ -172,6 +176,8 @@ impl Engine {
             support_transitions: vec![0; population],
             support_contact_mask: vec![0; population],
             last_support_transition_step: vec![-6; population],
+            last_grounded_group: vec![-1; population],
+            evaluation_metrics: vec![0.0; population * 10],
             fitness: vec![0.0; population],
             oscillator_sin: vec![0.0; oscillator_len],
             oscillator_cos: vec![0.0; oscillator_len],
@@ -206,12 +212,14 @@ impl Engine {
             let mut weighted_y = 0.0;
             self.alive[creature] = 1;
             self.reached[creature] = 0;
+            self.first_contact_step[creature] = -1;
             self.alive_frames[creature] = 0;
             self.head_height_sum[creature] = 0.0;
             self.support_air_frames[creature] = 0;
             self.support_transitions[creature] = 0;
             self.support_contact_mask[creature] = 0;
             self.last_support_transition_step[creature] = -6;
+            self.last_grounded_group[creature] = -1;
             for particle in 0..self.particle_count {
                 let index = particle_base + particle;
                 let x = self.spawn_x + self.particles[particle].x;
@@ -329,6 +337,15 @@ impl Engine {
                     self.x[index] = radius;
                     self.old_x[index] = radius;
                 }
+                if self.reached[creature] == 0
+                    && self.x[index] >= self.target_distance
+                    && self.x[index] <= self.target_distance + 100.0
+                    && self.y[index] >= self.ground_y - 100.0
+                    && self.y[index] <= self.ground_y - 20.0
+                {
+                    self.reached[creature] = 1;
+                    self.first_contact_step[creature] = self.current_step as i32;
+                }
                 let mass = self.particles[particle].mass;
                 total_mass += mass;
                 weighted_x += self.x[index] * mass;
@@ -349,22 +366,18 @@ impl Engine {
                 self.alive_frames[creature] += 1;
                 self.head_height_sum[creature] += (self.ground_y - head_y).max(0.0);
                 if contact_mask == 0 { self.support_air_frames[creature] += 1; }
-                let previous_mask = self.support_contact_mask[creature];
-                if contact_mask != previous_mask
-                    && self.current_step as i32 - self.last_support_transition_step[creature] >= 6
-                {
-                    if previous_mask != 0 || contact_mask != 0 { self.support_transitions[creature] += 1; }
-                    self.last_support_transition_step[creature] = self.current_step as i32;
+                if contact_mask != 0 && contact_mask.count_ones() == 1 {
+                    let grounded_group = contact_mask.trailing_zeros() as i16;
+                    let previous_group = self.last_grounded_group[creature];
+                    if previous_group >= 0 && previous_group != grounded_group
+                        && self.current_step as i32 - self.last_support_transition_step[creature] >= 6
+                    {
+                        self.support_transitions[creature] += 1;
+                        self.last_support_transition_step[creature] = self.current_step as i32;
+                    }
+                    self.last_grounded_group[creature] = grounded_group;
                 }
                 self.support_contact_mask[creature] = contact_mask;
-                if self.reached[creature] == 0
-                    && self.center_x[creature] >= self.target_distance
-                    && self.center_x[creature] <= self.target_distance + 100.0
-                    && self.center_y[creature] >= self.ground_y - 100.0
-                    && self.center_y[creature] <= self.ground_y - 20.0
-                {
-                    self.reached[creature] = 1;
-                }
             }
             for muscle in 0..self.muscle_count {
                 let index = muscle_base + muscle;
@@ -393,6 +406,17 @@ impl Engine {
         let mut target_index = -1i32;
         let mut best_distance = f32::NEG_INFINITY;
         for creature in 0..self.population {
+            let metrics = creature * 10;
+            self.evaluation_metrics[metrics] = self.center_x[creature];
+            self.evaluation_metrics[metrics + 1] = self.max_distance[creature];
+            self.evaluation_metrics[metrics + 2] = self.alive_frames[creature] as f32;
+            self.evaluation_metrics[metrics + 3] = self.total_generation_steps as f32;
+            self.evaluation_metrics[metrics + 4] = self.head_height_sum[creature];
+            self.evaluation_metrics[metrics + 5] = self.initial_standing_height;
+            self.evaluation_metrics[metrics + 6] = self.support_air_frames[creature] as f32;
+            self.evaluation_metrics[metrics + 7] = self.support_transitions[creature] as f32;
+            self.evaluation_metrics[metrics + 8] = self.reached[creature] as f32;
+            self.evaluation_metrics[metrics + 9] = self.first_contact_step[creature] as f32;
             let target_range = (self.target_distance - self.spawn_x).max(1.0);
             let distance = (self.max_distance[creature] - self.spawn_x).clamp(0.0, target_range);
             let progress = distance / target_range;
@@ -622,6 +646,19 @@ export_slice!(training_center_y_ptr, training_center_y_len, center_y);
 export_slice!(training_last_best_ptr, training_last_best_len, last_best_genome);
 export_slice!(training_last_target_ptr, training_last_target_len, last_target_genome);
 export_slice!(training_best_ever_ptr, training_best_ever_len, best_ever_genome);
+export_slice!(training_evaluation_metrics_ptr, training_evaluation_metrics_len, evaluation_metrics);
+
+#[no_mangle]
+pub extern "C" fn training_install_genomes(pointer: *const f32, length: usize) -> i32 {
+    if pointer.is_null() { return 0; }
+    let Some(engine) = engine_mut() else { return 0; };
+    if length != engine.genomes.len() { return 0; }
+    let values = unsafe { slice::from_raw_parts(pointer, length) };
+    engine.genomes.copy_from_slice(values);
+    engine.current_step = 0;
+    engine.reset_population();
+    1
+}
 
 #[no_mangle]
 pub extern "C" fn training_summary_ptr() -> *const f32 {
@@ -729,6 +766,17 @@ mod tests {
         assert!(engine.summary[2].is_finite());
         assert_eq!(engine.best_ever_genome.len(), 3);
         assert_eq!(&engine.genomes[0..3], &engine.last_best_genome);
+    }
+
+    #[test]
+    fn target_detection_uses_any_particle_instead_of_center_of_mass() {
+        let mut input = test_input(1, 1, 31);
+        input[11] = 115.0;
+        let mut engine = Engine::from_input(&input).expect("valid target engine");
+        engine.run_steps(1);
+        assert!(engine.center_x[0] < engine.target_distance);
+        assert_eq!(engine.reached[0], 1);
+        assert_eq!(engine.first_contact_step[0], 0);
     }
 
     #[test]

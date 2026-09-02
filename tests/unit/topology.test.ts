@@ -11,6 +11,7 @@ import {
   analyzeLocomotion,
   STICKMAN_TOPOLOGY,
 } from "@/core/topology"
+import { createAsymmetricTwoLegTopology } from "../fixtures/training"
 import { createTestTopology } from "../fixtures/training"
 
 describe("topology factories", () => {
@@ -138,5 +139,20 @@ describe("locomotion analysis", () => {
       ["r-foot"],
     ])
     expect([...analysis.muscleGroups]).toEqual([0, 1, 0, 1, -1, -1, -1, -1, -1, -1])
+  })
+
+  it("keeps manually marked asymmetric leg muscles in alternating gait groups", () => {
+    const analysis = analyzeLocomotion(createAsymmetricTwoLegTopology())
+    expect(analysis.source).toBe("manual")
+    expect([...analysis.muscleGroups]).toEqual([0, 1, 0, 1])
+    expect(analysis.warnings).toEqual([])
+  })
+
+  it("keeps muscles spanning competing manual support groups neutral", () => {
+    const topology = createAsymmetricTwoLegTopology()
+    topology.muscles.push({ id: "bridge", p1Id: "left-foot", p2Id: "right-foot", baseLength: 95, stiffness: 0.9, damping: 0 })
+    const analysis = analyzeLocomotion(topology)
+    expect(analysis.muscleGroups.at(-1)).toBe(-1)
+    expect(analysis.warnings.at(-1)).toContain("competing support groups")
   })
 })

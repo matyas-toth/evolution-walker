@@ -13,6 +13,12 @@ export interface EvaluatedGeneration {
     bestSurvival?: number
     bestSupportTransitions?: number
     hasWalkingCandidate?: boolean
+    medianDistance?: number
+    p90Distance?: number
+    bestGaitQuality?: number
+    archiveCoverage?: number
+    genomeDiversity?: number
+    stagnationGenerations?: number
 }
 
 /** Common contract shared by worker-local CPU, WASM, and GPU engines. */

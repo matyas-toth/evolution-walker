@@ -11,6 +11,8 @@ interface TrainingExports extends WebAssembly.Exports {
   training_generation(): number
   training_summary_ptr(): number
   training_summary_len(): number
+  training_evaluation_metrics_ptr(): number
+  training_evaluation_metrics_len(): number
 }
 
 function engineInput(seed: number): Float32Array {
@@ -50,6 +52,13 @@ describe.each(["training-engine-scalar.wasm", "training-engine-simd.wasm"])("%s"
     expect(exports.training_generation()).toBe(2)
     expect(summary).toHaveLength(12)
     expect(summary.every(Number.isFinite)).toBe(true)
+    const metrics = new Float32Array(
+      exports.memory.buffer,
+      exports.training_evaluation_metrics_ptr(),
+      exports.training_evaluation_metrics_len(),
+    )
+    expect(metrics).toHaveLength(20)
+    expect([...metrics].every(Number.isFinite)).toBe(true)
   })
 })
 

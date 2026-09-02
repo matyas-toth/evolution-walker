@@ -4,10 +4,11 @@ import { RustWasmTrainingEngine } from "./RustWasmTrainingEngine"
 import type { ActiveTrainingBackend, Genome, Topology, TrainingEngineConfig } from "@/core/types"
 
 type ShardCommand =
-    | { id: number; type: "init"; topology: Topology; config: TrainingEngineConfig; population?: Genome[]; generation: number; backend: ActiveTrainingBackend }
+    | { id: number; type: "init"; topology: Topology; config: TrainingEngineConfig; population?: Genome[]; generation: number; backend: ActiveTrainingBackend; externalEvolution?: boolean }
     | { id: number; type: "run"; maxSteps: number; budgetMs: number; includeRender: boolean }
     | { id: number; type: "finish" }
     | { id: number; type: "update"; config: TrainingEngineConfig }
+    | { id: number; type: "install"; population: Genome[] }
     | { id: number; type: "export" }
     | { id: number; type: "dispose" }
 
@@ -19,7 +20,7 @@ scope.onmessage = async (message: MessageEvent<ShardCommand>) => {
     try {
         switch (command.type) {
             case "init":
-                engine = await RustWasmTrainingEngine.create(command.topology, command.config, command.population, command.generation, command.backend)
+                engine = await RustWasmTrainingEngine.create(command.topology, command.config, command.population, command.generation, command.backend, undefined, command.externalEvolution)
                 scope.postMessage({ id: command.id, ok: true })
                 break
             case "run": {
@@ -35,13 +36,20 @@ scope.onmessage = async (message: MessageEvent<ShardCommand>) => {
             case "finish": {
                 if (!engine) throw new Error("Shard is not initialized")
                 const evaluated = engine.finishGeneration()
+                const batch = engine.getLastEvaluationBatch()
                 const snapshot = engine.getSnapshot("running", true)
                 const transfer: Transferable[] = snapshot.render
                     ? [snapshot.render.positions.buffer, snapshot.render.centers.buffer]
                     : []
-                scope.postMessage({ id: command.id, evaluated, snapshot }, transfer)
+                transfer.push(batch.metrics.values.buffer)
+                scope.postMessage({ id: command.id, evaluated, snapshot, batch }, transfer)
                 break
             }
+            case "install":
+                if (!engine) throw new Error("Shard is not initialized")
+                engine.installPopulation(command.population)
+                scope.postMessage({ id: command.id, ok: true })
+                break
             case "update":
                 engine?.updateConfig(command.config)
                 scope.postMessage({ id: command.id, ok: true })

@@ -30,7 +30,7 @@ interface BenchmarkResult {
     transferMs: number
     totalGenerationMs: number
   }
-  finalBestFitness: number
+  finalBestDistance: number
 }
 
 function parseList<T extends string | number>(value: string | undefined, defaults: T[], parse: (item: string) => T) {
@@ -98,7 +98,7 @@ test("records the seeded production training matrix", async ({ page }) => {
           const generationAfter = Number(await metric(page, "Generation").textContent())
           const rateText = await metric(page, desiredBackground ? "Throughput" : "Paced rate").textContent()
           const memoryText = await metric(page, "Memory").textContent()
-          const best = Number(await metric(page, "Max Fitness").textContent())
+          const best = Number.parseFloat(await metric(page, "Best Distance").textContent() ?? "0")
           const diagnostics = page.getByTestId("training-sidebar")
           const readDiagnostic = async (name: string) => Number(await diagnostics.getAttribute(name) ?? 0)
           results.push({
@@ -126,7 +126,7 @@ test("records the seeded production training matrix", async ({ page }) => {
               transferMs: await readDiagnostic("data-stage-transfer-ms"),
               totalGenerationMs: await readDiagnostic("data-stage-total-ms"),
             },
-            finalBestFitness: best,
+            finalBestDistance: best,
           })
           await page.getByRole("button", { name: "Reset" }).click()
         }

@@ -176,8 +176,10 @@ export interface TrainingHubConfig {
   workerCount?: 'auto' | number
   /** Maximum worker-to-UI update frequency. */
   snapshotHz?: number
-  /** Fitness/evolution policy. New and resumed training runs use policy 2. */
+  /** Fitness/evolution policy. New and resumed training runs use policy 3. */
   evolutionPolicyVersion?: number
+  /** Serializable v3 archive/RNG state stored inside the existing session config JSON. */
+  policyState?: import('../training/types').EvolutionPolicyState
 }
 
 /**

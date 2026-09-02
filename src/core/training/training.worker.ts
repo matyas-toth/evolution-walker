@@ -113,17 +113,17 @@ async function initializeEngine(emitReady = true): Promise<void> {
     activeBackend = config.backend === "auto" ? await selectAutoBackend() : await resolveBackend(config.backend)
     try {
         engine = activeBackend === "legacy"
-            ? new PackedCpuTrainingEngine(topology, config, initialPopulation, initialGeneration)
+            ? new PackedCpuTrainingEngine(topology, config, initialPopulation, initialGeneration, config.policyState)
             : activeBackend === "webgpu"
-            ? await WebGpuTrainingEngine.create(topology, config, initialPopulation, initialGeneration)
+            ? await WebGpuTrainingEngine.create(topology, config, initialPopulation, initialGeneration, false, config.policyState)
             : activeBackend === "wasm-simd"
-                ? await MulticoreWasmTrainingEngine.create(topology, config, initialPopulation, initialGeneration, activeBackend)
-                : await RustWasmTrainingEngine.create(topology, config, initialPopulation, initialGeneration, activeBackend)
+                ? await MulticoreWasmTrainingEngine.create(topology, config, initialPopulation, initialGeneration, activeBackend, config.policyState)
+                : await RustWasmTrainingEngine.create(topology, config, initialPopulation, initialGeneration, activeBackend, config.policyState)
     } catch (acceleratedError) {
         if (activeBackend === "webgpu") {
             try {
                 activeBackend = "wasm-simd"
-                engine = await MulticoreWasmTrainingEngine.create(topology, config, initialPopulation, initialGeneration, activeBackend)
+                engine = await MulticoreWasmTrainingEngine.create(topology, config, initialPopulation, initialGeneration, activeBackend, config.policyState)
             } catch {
                 engine = null
             }
@@ -137,6 +137,7 @@ async function initializeEngine(emitReady = true): Promise<void> {
                     initialPopulation,
                     initialGeneration,
                     activeBackend,
+                    config.policyState,
                 )
             } catch {
                 engine = null
@@ -153,7 +154,7 @@ async function initializeEngine(emitReady = true): Promise<void> {
         }
         if (!engine) {
             activeBackend = "wasm-scalar"
-            engine = new PackedCpuTrainingEngine(topology, config, initialPopulation, initialGeneration)
+            engine = new PackedCpuTrainingEngine(topology, config, initialPopulation, initialGeneration, config.policyState)
             emit({
                 type: "error",
                 message: acceleratedError instanceof Error
@@ -221,6 +222,10 @@ function emitPendingGeneration(force = false): void {
         bestFitness: evaluated.bestFitness,
         averageFitness: evaluated.averageFitness,
         bestGenome: evaluated.bestGenome,
+        bestDistance: evaluated.bestDistance,
+        medianDistance: evaluated.medianDistance,
+        p90Distance: evaluated.p90Distance,
+        bestGaitQuality: evaluated.bestGaitQuality,
     })
 }
 
@@ -241,7 +246,8 @@ async function runChunk(): Promise<void> {
         if (!topology || !config) throw backendError
         const checkpoint = await engine.exportState()
         activeBackend = "wasm-scalar"
-        engine = await RustWasmTrainingEngine.create(topology, config, checkpoint.population, checkpoint.generation, activeBackend)
+        config = { ...config, policyState: checkpoint.policyState }
+        engine = await RustWasmTrainingEngine.create(topology, config, checkpoint.population, checkpoint.generation, activeBackend, checkpoint.policyState)
         emit({
             type: "error",
             message: backendError instanceof Error
@@ -336,6 +342,7 @@ async function handleCommand(command: TrainingCommand): Promise<void> {
                 running = false
                 initialPopulation = undefined
                 initialGeneration = 1
+                if (config) config = { ...config, policyState: undefined }
                 await initializeEngine()
                 break
             case "updateConfig": {
@@ -355,6 +362,7 @@ async function handleCommand(command: TrainingCommand): Promise<void> {
                     running = false
                     initialPopulation = checkpoint.population
                     initialGeneration = checkpoint.generation
+                    config = { ...config, policyState: checkpoint.policyState }
                     await initializeEngine(false)
                     await restoreGenerationProgress(previousProgress)
                     phase = previousPhase

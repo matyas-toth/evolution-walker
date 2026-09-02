@@ -8,10 +8,12 @@ import type {
     TrainingEngineState,
     TrainingSnapshot,
     TrainingStageTimings,
+    EvolutionPolicyState,
 } from "@/core/types"
 import type { EvaluatedGeneration, TrainingBackendEngine } from "./engineBackend"
-import { RustWasmTrainingEngine } from "./RustWasmTrainingEngine"
+import { RustWasmTrainingEngine, type WasmEvaluationBatch } from "./RustWasmTrainingEngine"
 import { captureReplayFrames } from "./replayCapture"
+import { CANDIDATE_METRIC_STRIDE, EvolutionPolicyV3 } from "./EvolutionPolicyV3"
 
 interface ShardResponse {
     id: number
@@ -22,6 +24,7 @@ interface ShardResponse {
     evaluated?: EvaluatedGeneration
     snapshot?: TrainingSnapshot
     state?: TrainingEngineState
+    batch?: WasmEvaluationBatch
 }
 
 class ShardClient {
@@ -76,8 +79,9 @@ export class MulticoreWasmTrainingEngine implements TrainingBackendEngine {
     private readonly generationDurations: number[] = []
     private generationStartedAt = performance.now()
     private memoryBytes = 0
+    private readonly policy: EvolutionPolicyV3
 
-    static async create(topology: Topology, config: TrainingEngineConfig, population: Genome[] | undefined, generation: number, backend: ActiveTrainingBackend): Promise<MulticoreWasmTrainingEngine> {
+    static async create(topology: Topology, config: TrainingEngineConfig, population: Genome[] | undefined, generation: number, backend: ActiveTrainingBackend, policyState?: EvolutionPolicyState): Promise<MulticoreWasmTrainingEngine> {
         const startedAt = performance.now()
         const hardwareWorkers = Math.max(1, (navigator.hardwareConcurrency || 2) - 1)
         const requested = config.workerCount === "auto" ? hardwareWorkers : Math.max(1, Math.floor(config.workerCount))
@@ -89,26 +93,30 @@ export class MulticoreWasmTrainingEngine implements TrainingBackendEngine {
             const size = Math.ceil((config.populationSize - populationCursor) / remainingWorkers)
             const client = new ShardClient()
             const shardConfig: TrainingEngineConfig = { ...config, populationSize: size, workerCount: 1, seed: (config.seed + shard * 0x9e3779b9) >>> 0 }
-            await client.request({ type: "init", topology, config: shardConfig, population: population?.slice(populationCursor, populationCursor + size), generation, backend })
+            await client.request({ type: "init", topology, config: shardConfig, population: population?.slice(populationCursor, populationCursor + size), generation, backend, externalEvolution: true })
             descriptors.push({ client, populationSize: size })
             populationCursor += size
         }
-        const engine = new MulticoreWasmTrainingEngine(descriptors, topology, config, generation, backend)
+        const engine = new MulticoreWasmTrainingEngine(descriptors, topology, config, generation, backend, policyState)
         engine.timings.initializeMs = performance.now() - startedAt
         return engine
     }
 
-    private constructor(shards: ShardDescriptor[], topology: Topology, config: TrainingEngineConfig, generation: number, backend: ActiveTrainingBackend) {
+    private constructor(shards: ShardDescriptor[], topology: Topology, config: TrainingEngineConfig, generation: number, backend: ActiveTrainingBackend, policyState?: EvolutionPolicyState) {
         this.shards = shards
         this.topology = topology
         this.config = config
         this.generation = generation
         this.backend = backend
+        this.policy = new EvolutionPolicyV3(topology, config, policyState)
+        this.bestGenome = this.policy.getChampionGenome(generation)
+        this.bestFitness = this.policy.getChampionFitness()
         this.timings = { initializeMs: 0, simulationMs: 0, fitnessMs: 0, evolutionMs: 0, resetMs: 0, transferMs: 0, totalGenerationMs: 0 }
     }
 
     updateConfig(config: TrainingEngineConfig): void {
         this.config = config
+        this.policy.updateConfig(config)
         for (const shard of this.shards) {
             const shardConfig = { ...config, populationSize: shard.populationSize, workerCount: 1 }
             void shard.client.request({ type: "update", config: shardConfig })
@@ -139,7 +147,7 @@ export class MulticoreWasmTrainingEngine implements TrainingBackendEngine {
         const finished = await Promise.all(this.shards.map((shard) => shard.client.request({ type: "finish" })))
         this.timings.fitnessMs = performance.now() - transitionStarted
         this.memoryBytes = finished.reduce((sum, response) => sum + (response.snapshot?.diagnostics.memoryBytes ?? 0), 0)
-        this.combineEvaluations(finished)
+        await this.evolveGlobally(finished)
         this.lastRender = this.combineRenderSnapshots(finished)
         this.timings.totalGenerationMs = performance.now() - this.generationStartedAt
         this.generationDurations.push(this.timings.totalGenerationMs)
@@ -159,6 +167,7 @@ export class MulticoreWasmTrainingEngine implements TrainingBackendEngine {
     }
 
     getSnapshot(phase: TrainingSnapshot["phase"], includeRender: boolean): TrainingSnapshot {
+        const policyDiagnostics = this.policy.getDiagnostics()
         const average = this.generationDurations.length ? this.generationDurations.reduce((sum, value) => sum + value, 0) / this.generationDurations.length : 0
         return {
             phase, generation: this.generation, progress: Math.round(this.progress),
@@ -168,6 +177,14 @@ export class MulticoreWasmTrainingEngine implements TrainingBackendEngine {
                 backend: this.backend, workerCount: this.shards.length,
                 generationsPerSecond: average ? 1000 / average : 0,
                 stageTimings: { ...this.timings }, droppedSnapshots: 0, memoryBytes: this.memoryBytes,
+                policyVersion: 3,
+                bestDistance: this.pendingEvaluation?.bestDistance ?? policyDiagnostics.bestDistance,
+                medianDistance: this.pendingEvaluation?.medianDistance,
+                p90Distance: this.pendingEvaluation?.p90Distance,
+                bestGaitQuality: this.pendingEvaluation?.bestGaitQuality,
+                archiveCoverage: this.pendingEvaluation?.archiveCoverage ?? policyDiagnostics.archiveCoverage,
+                genomeDiversity: this.pendingEvaluation?.genomeDiversity,
+                stagnationGenerations: this.pendingEvaluation?.stagnationGenerations ?? policyDiagnostics.stagnationGenerations,
             },
             render: includeRender ? this.lastRender : undefined,
         }
@@ -182,6 +199,7 @@ export class MulticoreWasmTrainingEngine implements TrainingBackendEngine {
             bestGenome: this.bestGenome,
             bestFitness: Number.isFinite(this.bestFitness) ? this.bestFitness : 0,
             generation: this.generation,
+            policyState: this.policy.exportState(),
         }
     }
 
@@ -203,14 +221,46 @@ export class MulticoreWasmTrainingEngine implements TrainingBackendEngine {
         return captureReplayFrames(replayEngine, this.topology, replayConfig, genome, this.backend)
     }
 
-    private combineEvaluations(responses: ShardResponse[]): void {
-        const evaluations = responses.map((response) => response.evaluated).filter((value): value is EvaluatedGeneration => Boolean(value))
-        if (!evaluations.length) throw new Error("WASM shards returned no generation results")
-        const best = evaluations.reduce((winner, candidate) => candidate.bestFitness > winner.bestFitness ? candidate : winner)
-        const target = evaluations.find((evaluation) => evaluation.targetGenome)
-        const averageFitness = evaluations.reduce((sum, evaluation, index) => sum + evaluation.averageFitness * this.shards[index].populationSize, 0) / this.config.populationSize
-        if (best.bestFitness > this.bestFitness) { this.bestFitness = best.bestFitness; this.bestGenome = best.bestGenome }
-        this.pendingEvaluation = { ...best, generation: this.generation, averageFitness, targetGenome: target?.targetGenome ?? null, targetIndex: target ? target.targetIndex : -1 }
+    private async evolveGlobally(responses: ShardResponse[]): Promise<void> {
+        const batches = responses.map((response) => response.batch).filter((batch): batch is WasmEvaluationBatch => Boolean(batch))
+        if (batches.length !== this.shards.length) throw new Error("WASM shards returned incomplete evaluation metrics")
+        const population = batches.flatMap((batch) => batch.population)
+        const values = new Float32Array(this.config.populationSize * CANDIDATE_METRIC_STRIDE)
+        let metricCursor = 0
+        for (const batch of batches) {
+            values.set(batch.metrics.values, metricCursor)
+            metricCursor += batch.metrics.values.length
+        }
+        const evolutionStartedAt = performance.now()
+        const result = this.policy.evaluateAndEvolve(population, { populationSize: population.length, values }, this.generation)
+        let cursor = 0
+        await Promise.all(this.shards.map((shard) => {
+            const next = result.genomes.slice(cursor, cursor + shard.populationSize)
+            cursor += shard.populationSize
+            return shard.client.request({ type: "install", population: next })
+        }))
+        this.timings.evolutionMs = performance.now() - evolutionStartedAt
+        this.bestFitness = Math.max(this.bestFitness, result.bestFitness)
+        this.bestGenome = result.championGenome
+        this.pendingEvaluation = {
+            generation: this.generation,
+            bestFitness: result.bestFitness,
+            averageFitness: result.averageFitness,
+            bestIndex: result.bestIndex,
+            targetIndex: result.targetIndex,
+            bestGenome: population[result.bestIndex],
+            targetGenome: result.targetIndex >= 0 ? population[result.targetIndex] : null,
+            bestDistance: result.bestDistance,
+            medianDistance: result.medianDistance,
+            p90Distance: result.p90Distance,
+            bestGaitQuality: result.bestGaitQuality,
+            archiveCoverage: result.archiveCoverage,
+            genomeDiversity: result.genomeDiversity,
+            stagnationGenerations: result.stagnationGenerations,
+            bestProgress: result.bestDistance / Math.max(1, this.config.targetDistance - 100),
+            bestSurvival: result.scores[result.bestIndex].survival,
+            bestSupportTransitions: result.scores[result.bestIndex].alternatingTransitions,
+        }
     }
 
     private combineRenderSnapshots(responses: ShardResponse[]): PackedRenderSnapshot | undefined {

@@ -71,4 +71,18 @@ describe("PackedCpuTrainingEngine", () => {
     expect(engine.getProgress()).toBe(progress)
     expect(engine.getGeneration()).toBe(1)
   })
+
+  it("restores the v3 champion, archive, and stagnation state across backend checkpoints", async () => {
+    const topology = createTestTopology()
+    const config = createTrainingConfig({ populationSize: 4 })
+    const source = new PackedCpuTrainingEngine(topology, config)
+    await finish(source)
+    const checkpoint = source.exportState()
+    const restored = new PackedCpuTrainingEngine(topology, config, checkpoint.population, checkpoint.generation, checkpoint.policyState)
+    const snapshot = restored.getSnapshot("paused", false)
+    expect(restored.getBestGenome()).not.toBeNull()
+    expect(snapshot.diagnostics.policyVersion).toBe(3)
+    expect(snapshot.diagnostics.archiveCoverage).toBeGreaterThan(0)
+    expect(snapshot.diagnostics.bestDistance).toBe(checkpoint.policyState?.bestSustainedDistance)
+  })
 })

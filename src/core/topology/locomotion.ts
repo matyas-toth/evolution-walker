@@ -1,10 +1,13 @@
 import type { Topology } from '@/core/types'
 
+export const MAX_SUPPORT_GROUPS = 24
+
 export interface LocomotionAnalysis {
   supportGroups: number[][]
   muscleGroups: Int16Array
   initialStandingHeight: number
   source: 'manual' | 'automatic' | 'fallback'
+  warnings: string[]
 }
 
 function clusterByX(indexes: number[], topology: Topology): number[][] {
@@ -36,7 +39,7 @@ function buildRigidAdjacency(topology: Topology): number[][] {
   return adjacency
 }
 
-function distancesFromGroup(group: number[], adjacency: number[][]): Int16Array {
+function distancesFromGroup(group: number[], adjacency: number[][], blocked: ReadonlySet<number> = new Set()): Int16Array {
   const distances = new Int16Array(adjacency.length)
   distances.fill(0x7fff)
   const queue = [...group]
@@ -44,6 +47,7 @@ function distancesFromGroup(group: number[], adjacency: number[][]): Int16Array 
   for (let cursor = 0; cursor < queue.length; cursor++) {
     const current = queue[cursor]
     for (const next of adjacency[current]) {
+      if (blocked.has(next)) continue
       if (distances[next] <= distances[current] + 1) continue
       distances[next] = distances[current] + 1
       queue.push(next)
@@ -54,6 +58,7 @@ function distancesFromGroup(group: number[], adjacency: number[][]): Int16Array 
 
 /** Detects arbitrary support counts while respecting explicit editor overrides. */
 export function analyzeLocomotion(topology: Topology): LocomotionAnalysis {
+  const warnings: string[] = []
   const adjacency = buildRigidAdjacency(topology)
   const manualSupport = topology.particles.map((particle, index) => ({ particle, index }))
     .filter(({ particle }) => particle.locomotionRole === 'support' && !particle.isLocked)
@@ -87,8 +92,12 @@ export function analyzeLocomotion(topology: Topology): LocomotionAnalysis {
   }
   const meanX = (group: number[]) => group.reduce((sum, index) => sum + topology.particles[index].initialPos.x, 0) / group.length
   supportGroups.sort((left, right) => meanX(left) - meanX(right))
+  supportGroups = supportGroups.slice(0, MAX_SUPPORT_GROUPS)
 
-  const distances = supportGroups.map((group) => distancesFromGroup(group, adjacency))
+  const blockedBodyParticles = new Set(topology.particles
+    .map((particle, index) => particle.locomotionRole === 'body' ? index : -1)
+    .filter((index) => index >= 0))
+  const distances = supportGroups.map((group) => distancesFromGroup(group, adjacency, source === 'manual' ? blockedBodyParticles : undefined))
   const ids = new Map(topology.particles.map((particle, index) => [particle.id, index]))
   const head = topology.particles.find((particle) => particle.isHead || particle.id === 'head') ?? topology.particles[0]
   const supportY = supportGroups.flat().reduce((maximum, index) => Math.max(maximum, topology.particles[index].initialPos.y), head?.initialPos.y ?? 0)
@@ -100,6 +109,21 @@ export function analyzeLocomotion(topology: Topology): LocomotionAnalysis {
   muscleGroups.fill(-1)
   topology.muscles.forEach((muscle, muscleIndex) => {
     const endpoints = [ids.get(muscle.p1Id), ids.get(muscle.p2Id)].filter((value): value is number => value !== undefined)
+    if (!endpoints.length) return
+    if (source === 'manual') {
+      const directGroups = supportGroups
+        .map((group, groupIndex) => endpoints.some((endpoint) => group.includes(endpoint)) ? groupIndex : -1)
+        .filter((groupIndex) => groupIndex >= 0)
+      if (directGroups.length === 1) {
+        muscleGroups[muscleIndex] = directGroups[0]
+        return
+      }
+      if (directGroups.length > 1) {
+        warnings.push(`Muscle ${muscle.id} connects competing support groups and was classified as neutral.`)
+        return
+      }
+      if (endpoints.some((endpoint) => blockedBodyParticles.has(endpoint))) return
+    }
     const lowestEndpoint = endpoints.reduce((maximum, index) => Math.max(maximum, topology.particles[index].initialPos.y), Number.NEGATIVE_INFINITY)
     let bestGroup = -1
     let bestDistance = 0x7fff
@@ -107,8 +131,18 @@ export function analyzeLocomotion(topology: Topology): LocomotionAnalysis {
       const distance = Math.min(...endpoints.map((index) => groupDistances[index]))
       if (distance < bestDistance) { bestDistance = distance; bestGroup = groupIndex }
     })
-    if ((bestDistance <= 2 && lowestEndpoint >= lowerBodyThreshold) || topology.muscles.length === 1) muscleGroups[muscleIndex] = bestGroup
+    if (source === 'manual' && bestDistance < 0x7fff) {
+      const tiedGroups = distances.filter((groupDistances) => Math.min(...endpoints.map((index) => groupDistances[index])) === bestDistance).length
+      if (tiedGroups > 1) {
+        warnings.push(`Muscle ${muscle.id} is equally connected to multiple support groups and was classified as neutral.`)
+        return
+      }
+    }
+    const isEligible = source === 'manual'
+      ? bestDistance <= 2
+      : bestDistance <= 2 && lowestEndpoint >= lowerBodyThreshold
+    if (isEligible || topology.muscles.length === 1) muscleGroups[muscleIndex] = bestGroup
   })
 
-  return { supportGroups, muscleGroups, initialStandingHeight, source }
+  return { supportGroups, muscleGroups, initialStandingHeight, source, warnings }
 }
