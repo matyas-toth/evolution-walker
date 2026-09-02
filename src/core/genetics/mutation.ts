@@ -4,6 +4,7 @@
  */
 
 import { Genome } from '@/core/types';
+import { wrapPhase } from '@/core/training/evolutionPolicy';
 
 /**
  * Mutates a genome using Gaussian mutation
@@ -26,22 +27,11 @@ export function mutateGenome(
       return gene; // No mutation
     }
 
-    // Apply Gaussian mutation with bounds checking
-    const mutateValue = (
-      value: number,
-      min: number,
-      max: number
-    ): number => {
-      const change = (Math.random() - 0.5) * 2 * mutationStrength;
-      const newValue = value * (1 + change);
-      return Math.max(min, Math.min(max, newValue));
-    };
-
     return {
       ...gene,
-      amplitude: mutateValue(gene.amplitude, 0.05, 0.8),
-      frequency: mutateValue(gene.frequency, 0.1, 5.0),
-      phase: mutateValue(gene.phase, 0, Math.PI * 2),
+      amplitude: Math.max(0.05, Math.min(0.8, gene.amplitude + (Math.random() - 0.5) * 0.4 * mutationStrength)),
+      frequency: Math.max(0.1, Math.min(5, gene.frequency + (Math.random() - 0.5) * 2 * mutationStrength)),
+      phase: wrapPhase(gene.phase + (Math.random() - 0.5) * 2 * Math.PI * mutationStrength),
     };
   });
 

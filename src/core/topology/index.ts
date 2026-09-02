@@ -22,6 +22,8 @@ export {
   offsetTopology,
 } from './factory';
 
+export { analyzeLocomotion, type LocomotionAnalysis } from './locomotion';
+
 // Re-export topology types
 export type {
   Topology,

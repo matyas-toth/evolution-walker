@@ -15,6 +15,7 @@ struct ParticleDef {
     mass: f32,
     radius: f32,
     locked: bool,
+    support_group: u8,
 }
 
 #[derive(Clone, Copy)]
@@ -56,6 +57,13 @@ struct Engine {
     center_y: Vec<f32>,
     max_distance: Vec<f32>,
     min_head_y: Vec<f32>,
+    initial_standing_height: f32,
+    alive_frames: Vec<u32>,
+    head_height_sum: Vec<f32>,
+    support_air_frames: Vec<u32>,
+    support_transitions: Vec<u16>,
+    support_contact_mask: Vec<u32>,
+    last_support_transition_step: Vec<i32>,
     fitness: Vec<f32>,
     oscillator_sin: Vec<f32>,
     oscillator_cos: Vec<f32>,
@@ -65,7 +73,9 @@ struct Engine {
     best_ever_genome: Vec<f32>,
     last_best_genome: Vec<f32>,
     last_target_genome: Vec<f32>,
-    summary: [f32; 8],
+    summary: [f32; 12],
+    best_distance_ever: f32,
+    stagnation_generations: u32,
 }
 
 impl Engine {
@@ -84,7 +94,7 @@ impl Engine {
         let mut particles = Vec::with_capacity(particle_count);
         let mut head_index = 0;
         for index in 0..particle_count {
-            if cursor + 6 > input.len() {
+            if cursor + 7 > input.len() {
                 return None;
             }
             particles.push(ParticleDef {
@@ -93,11 +103,12 @@ impl Engine {
                 mass: input[cursor + 2].max(0.0001),
                 radius: input[cursor + 3],
                 locked: input[cursor + 4] != 0.0,
+                support_group: input[cursor + 6].max(0.0).min(31.0) as u8,
             });
             if input[cursor + 5] != 0.0 {
                 head_index = index;
             }
-            cursor += 6;
+            cursor += 7;
         }
         let mut constraints = Vec::with_capacity(constraint_count);
         for _ in 0..constraint_count {
@@ -121,6 +132,9 @@ impl Engine {
         let particle_len = population * particle_count;
         let oscillator_len = population * muscle_count;
         let genome_stride = muscle_count * 3;
+        let support_y = particles.iter().filter(|particle| particle.support_group > 0)
+            .map(|particle| particle.y).fold(particles[head_index].y, f32::max);
+        let initial_standing_height = (support_y - particles[head_index].y).max(1.0);
         let mut engine = Self {
             population,
             particle_count,
@@ -151,6 +165,13 @@ impl Engine {
             center_y: vec![0.0; population],
             max_distance: vec![0.0; population],
             min_head_y: vec![0.0; population],
+            initial_standing_height,
+            alive_frames: vec![0; population],
+            head_height_sum: vec![0.0; population],
+            support_air_frames: vec![0; population],
+            support_transitions: vec![0; population],
+            support_contact_mask: vec![0; population],
+            last_support_transition_step: vec![-6; population],
             fitness: vec![0.0; population],
             oscillator_sin: vec![0.0; oscillator_len],
             oscillator_cos: vec![0.0; oscillator_len],
@@ -160,7 +181,9 @@ impl Engine {
             best_ever_genome: vec![0.0; genome_stride],
             last_best_genome: vec![0.0; genome_stride],
             last_target_genome: Vec::new(),
-            summary: [0.0; 8],
+            summary: [0.0; 12],
+            best_distance_ever: f32::NEG_INFINITY,
+            stagnation_generations: 0,
         };
         engine.reset_population();
         Some(engine)
@@ -183,6 +206,12 @@ impl Engine {
             let mut weighted_y = 0.0;
             self.alive[creature] = 1;
             self.reached[creature] = 0;
+            self.alive_frames[creature] = 0;
+            self.head_height_sum[creature] = 0.0;
+            self.support_air_frames[creature] = 0;
+            self.support_transitions[creature] = 0;
+            self.support_contact_mask[creature] = 0;
+            self.last_support_transition_step[creature] = -6;
             for particle in 0..self.particle_count {
                 let index = particle_base + particle;
                 let x = self.spawn_x + self.particles[particle].x;
@@ -284,6 +313,7 @@ impl Engine {
             let mut total_mass = 0.0;
             let mut weighted_x = 0.0;
             let mut weighted_y = 0.0;
+            let mut contact_mask = 0u32;
             for particle in 0..self.particle_count {
                 let index = particle_base + particle;
                 let radius = self.particles[particle].radius;
@@ -303,13 +333,9 @@ impl Engine {
                 total_mass += mass;
                 weighted_x += self.x[index] * mass;
                 weighted_y += self.y[index] * mass;
-                if self.reached[creature] == 0
-                    && self.x[index] >= self.target_distance
-                    && self.x[index] <= self.target_distance + 100.0
-                    && self.y[index] >= self.ground_y - 100.0
-                    && self.y[index] <= self.ground_y - 20.0
-                {
-                    self.reached[creature] = 1;
+                let support_group = self.particles[particle].support_group;
+                if support_group > 0 && self.y[index] >= maximum_y - 1.0 {
+                    contact_mask |= 1u32 << (support_group - 1);
                 }
             }
             let head_y = self.y[particle_base + self.head_index];
@@ -320,6 +346,25 @@ impl Engine {
                 self.center_x[creature] = weighted_x / total_mass;
                 self.center_y[creature] = weighted_y / total_mass;
                 self.max_distance[creature] = self.max_distance[creature].max(self.center_x[creature]);
+                self.alive_frames[creature] += 1;
+                self.head_height_sum[creature] += (self.ground_y - head_y).max(0.0);
+                if contact_mask == 0 { self.support_air_frames[creature] += 1; }
+                let previous_mask = self.support_contact_mask[creature];
+                if contact_mask != previous_mask
+                    && self.current_step as i32 - self.last_support_transition_step[creature] >= 6
+                {
+                    if previous_mask != 0 || contact_mask != 0 { self.support_transitions[creature] += 1; }
+                    self.last_support_transition_step[creature] = self.current_step as i32;
+                }
+                self.support_contact_mask[creature] = contact_mask;
+                if self.reached[creature] == 0
+                    && self.center_x[creature] >= self.target_distance
+                    && self.center_x[creature] <= self.target_distance + 100.0
+                    && self.center_y[creature] >= self.ground_y - 100.0
+                    && self.center_y[creature] <= self.ground_y - 20.0
+                {
+                    self.reached[creature] = 1;
+                }
             }
             for muscle in 0..self.muscle_count {
                 let index = muscle_base + muscle;
@@ -346,19 +391,25 @@ impl Engine {
         let mut total_fitness = 0.0;
         let mut best_index = 0usize;
         let mut target_index = -1i32;
+        let mut best_distance = f32::NEG_INFINITY;
         for creature in 0..self.population {
-            let distance = self.max_distance[creature] - self.spawn_x;
-            let target_center = self.target_distance + 50.0;
-            let target_range = (self.target_distance - self.spawn_x).abs().max(1.0);
-            let target_bonus = if self.reached[creature] != 0 {
-                1000.0
-            } else {
-                (1.0 - (self.center_x[creature] - target_center).abs() / target_range).max(0.0) * 500.0
-            };
-            let upright = 50.0 * ((self.ground_y - self.min_head_y[creature]) / self.ground_y).max(0.0);
-            let death = if self.alive[creature] == 0 { -500.0 } else { 0.0 };
-            let fitness = distance + target_bonus + upright + death;
+            let target_range = (self.target_distance - self.spawn_x).max(1.0);
+            let distance = (self.max_distance[creature] - self.spawn_x).clamp(0.0, target_range);
+            let progress = distance / target_range;
+            let survival = (self.alive_frames[creature] as f32 / self.total_generation_steps.max(1) as f32).clamp(0.0, 1.0);
+            let upright = (self.head_height_sum[creature] / self.alive_frames[creature].max(1) as f32
+                / self.initial_standing_height).clamp(0.0, 1.0);
+            let duration = self.total_generation_steps.max(1) as f32 * DT;
+            let gait_rate = (self.support_transitions[creature] as f32 / duration).clamp(0.0, 2.0);
+            let airborne = (self.support_air_frames[creature] as f32 / self.alive_frames[creature].max(1) as f32).clamp(0.0, 1.0);
+            let fitness = distance + 250.0 * progress.sqrt()
+                + 120.0 * survival * (0.25 + 0.75 * upright)
+                + 80.0 * gait_rate * progress.sqrt()
+                - 60.0 * ((airborne - 0.35) / 0.65).clamp(0.0, 1.0)
+                - 100.0 * (1.0 - survival)
+                + if self.reached[creature] != 0 { 1000.0 } else { 0.0 };
             self.fitness[creature] = fitness;
+            best_distance = best_distance.max(distance);
             total_fitness += fitness;
             if fitness > best_fitness {
                 best_fitness = fitness;
@@ -367,6 +418,13 @@ impl Engine {
             if target_index < 0 && self.reached[creature] != 0 {
                 target_index = creature as i32;
             }
+        }
+        let improvement_threshold = (self.target_distance - self.spawn_x).max(1.0) * 0.0025;
+        if best_distance >= self.best_distance_ever + improvement_threshold {
+            self.best_distance_ever = best_distance;
+            self.stagnation_generations = 0;
+        } else {
+            self.stagnation_generations += 1;
         }
         let stride = self.muscle_count * 3;
         self.last_best_genome.copy_from_slice(&self.genomes[best_index * stride..(best_index + 1) * stride]);
@@ -388,6 +446,10 @@ impl Engine {
             self.best_ever_fitness,
             100.0,
             self.current_step as f32,
+            (self.max_distance[best_index] - self.spawn_x).max(0.0),
+            (self.max_distance[best_index] - self.spawn_x).max(0.0) / (self.target_distance - self.spawn_x).max(1.0),
+            self.alive_frames[best_index] as f32 / self.total_generation_steps.max(1) as f32,
+            self.support_transitions[best_index] as f32,
         ];
         self.evolve();
         self.generation += 1;
@@ -412,6 +474,12 @@ impl Engine {
         let parent_count = ((self.population as f32 * self.parent_percent) as usize).clamp(1, self.population);
         let stride = self.muscle_count * 3;
         let mut next = vec![0.0; self.genomes.len()];
+        let boost = ((self.stagnation_generations as f32 - 40.0) / 80.0).clamp(0.0, 1.0);
+        let mutation_rate = self.mutation_rate + (0.25 - self.mutation_rate) * boost;
+        let mutation_strength = self.mutation_strength + (0.5 - self.mutation_strength) * boost;
+        let immigrant_count = if self.stagnation_generations >= 80 && self.stagnation_generations % 80 == 0 {
+            ((self.population as f32 * 0.05).floor() as usize).max(1)
+        } else { 0 };
         for child in 0..self.population {
             if child < self.elitism.min(self.population) {
                 let source = ranked[child];
@@ -419,21 +487,35 @@ impl Engine {
                     .copy_from_slice(&self.genomes[source * stride..(source + 1) * stride]);
                 continue;
             }
+            if child >= self.population - immigrant_count {
+                let tempo = 0.7 + self.random() * 0.8;
+                for muscle in 0..self.muscle_count {
+                    let target = child * stride + muscle * 3;
+                    next[target] = 0.18 + self.random() * 0.34;
+                    next[target + 1] = (tempo + (self.random() - 0.5) * 0.12).clamp(0.1, 5.0);
+                    let phase = TWO_PI * muscle as f32 / self.muscle_count.max(1) as f32 + (self.random() - 0.5) * 0.24;
+                    next[target + 2] = phase.rem_euclid(TWO_PI);
+                }
+                continue;
+            }
             let parent1 = self.tournament(&ranked, parent_count);
             let parent2 = self.tournament(&ranked, parent_count);
             let bias = if self.fitness[parent1] >= self.fitness[parent2] { 0.6 } else { 0.4 };
-            for value in 0..stride {
+            for muscle in 0..self.muscle_count {
                 let source = if self.random() < bias { parent1 } else { parent2 };
-                let mut result = self.genomes[source * stride + value];
-                if self.random() <= self.mutation_rate {
-                    result *= 1.0 + (self.random() - 0.5) * 2.0 * self.mutation_strength;
-                    result = match value % 3 {
-                        0 => result.clamp(0.05, 0.8),
-                        1 => result.clamp(0.1, 5.0),
-                        _ => result.clamp(0.0, TWO_PI),
-                    };
+                let source_base = source * stride + muscle * 3;
+                let target_base = child * stride + muscle * 3;
+                let mut amplitude = self.genomes[source_base];
+                let mut frequency = self.genomes[source_base + 1];
+                let mut phase = self.genomes[source_base + 2];
+                if self.random() <= mutation_rate {
+                    amplitude = (amplitude + (self.random() - 0.5) * 0.4 * mutation_strength).clamp(0.05, 0.8);
+                    frequency = (frequency + (self.random() - 0.5) * 2.0 * mutation_strength).clamp(0.1, 5.0);
+                    phase = (phase + (self.random() - 0.5) * TWO_PI * mutation_strength).rem_euclid(TWO_PI);
                 }
-                next[child * stride + value] = result;
+                next[target_base] = amplitude;
+                next[target_base + 1] = frequency;
+                next[target_base + 2] = phase;
             }
         }
         self.genomes = next;
@@ -548,7 +630,7 @@ pub extern "C" fn training_summary_ptr() -> *const f32 {
 
 #[no_mangle]
 pub extern "C" fn training_summary_len() -> usize {
-    8
+    12
 }
 
 #[cfg(test)]
@@ -559,8 +641,8 @@ mod tests {
         let mut input = vec![
             population as f32, 2.0, 1.0, 1.0, steps as f32, 1.0, seed as f32,
             0.2, 0.4, 1.0, 0.5, 1400.0, 600.0, 570.0,
-            0.0, -20.0, 1.0, 5.0, 0.0, 1.0,
-            20.0, 0.0, 1.0, 5.0, 0.0, 0.0,
+            0.0, -20.0, 1.0, 5.0, 0.0, 1.0, 0.0,
+            20.0, 0.0, 1.0, 5.0, 0.0, 0.0, 1.0,
             0.0, 1.0, 20.0, 0.9, 0.0,
         ];
         for creature in 0..population {
@@ -577,7 +659,7 @@ mod tests {
     fn xorshift_never_stalls_for_nonzero_seed() {
         let mut engine = Engine::from_input(&[
             1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 42.0, 0.1, 0.2, 1.0, 1.0, 100.0, 600.0, 570.0,
-            0.0, 0.0, 1.0, 1.0, 0.0, 1.0,
+            0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0,
         ]).expect("valid minimal engine");
         assert_ne!(engine.random(), engine.random());
     }

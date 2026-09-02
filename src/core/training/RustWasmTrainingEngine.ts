@@ -11,6 +11,7 @@ import type {
 } from "@/core/types"
 import type { EvaluatedGeneration, TrainingBackendEngine } from "./engineBackend"
 import { captureReplayFrames } from "./replayCapture"
+import { analyzeLocomotion } from "@/core/topology/locomotion"
 
 interface TrainingWasmExports {
     memory: WebAssembly.Memory
@@ -199,6 +200,10 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
                     generation,
                 )
                 : null,
+            bestDistance: summary[8],
+            bestProgress: summary[9],
+            bestSurvival: summary[10],
+            bestSupportTransitions: summary[11],
         }
     }
 
@@ -271,7 +276,7 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
         const constraintCount = this.topology.constraints.length + this.topology.muscles.length
         const genomeLength = this.populationSize * this.muscleIds.length * 3
         const values = new Float32Array(
-            14 + this.particleCount * 6 + constraintCount * 5 + genomeLength,
+            14 + this.particleCount * 7 + constraintCount * 5 + genomeLength,
         )
         values.set([
             this.populationSize,
@@ -290,7 +295,13 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
             570,
         ])
         let cursor = 14
-        for (const particle of this.topology.particles) {
+        const locomotion = analyzeLocomotion(this.topology)
+        const supportByParticle = new Int16Array(this.particleCount)
+        locomotion.supportGroups.slice(0, 31).forEach((group, groupIndex) =>
+            group.forEach((particle) => { supportByParticle[particle] = groupIndex + 1 }),
+        )
+        for (let particleIndex = 0; particleIndex < this.topology.particles.length; particleIndex++) {
+            const particle = this.topology.particles[particleIndex]
             values.set([
                 particle.initialPos.x,
                 particle.initialPos.y,
@@ -298,8 +309,9 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
                 particle.radius,
                 particle.isLocked ? 1 : 0,
                 particle.isHead || particle.id === "head" ? 1 : 0,
+                supportByParticle[particleIndex],
             ], cursor)
-            cursor += 6
+            cursor += 7
         }
         for (const constraint of this.topology.constraints) {
             values.set([

@@ -32,12 +32,12 @@ interface TrainingHubProps {
 
 /** Derives initial config state from an optional saved session or sensible defaults. */
 function resolveInitialConfig(session?: SerializedSession): TrainingHubConfig {
-    if (session?.config) return session.config
+    if (session?.config) return { ...session.config, evolutionPolicyVersion: 2 }
     return {
         populationSize: 500,
         generationDuration: 10,
-        mutationRate: 0.12,
-        mutationStrength: 0.42,
+        mutationRate: 0.15,
+        mutationStrength: 0.28,
         elitismCount: 1,
         parentsTopPercent: 0.2,
         targetDistance: 1400,
@@ -47,6 +47,7 @@ function resolveInitialConfig(session?: SerializedSession): TrainingHubConfig {
         seed: 0x6d2b79f5,
         workerCount: "auto",
         snapshotHz: 5,
+        evolutionPolicyVersion: 2,
     }
 }
 

@@ -17,8 +17,8 @@ function engineInput(seed: number): Float32Array {
   return new Float32Array([
     2, 2, 1, 1, 3, 1, seed,
     0.2, 0.4, 1, 0.5, 1400, 600, 570,
-    0, -20, 1, 5, 0, 1,
-    20, 0, 1, 5, 0, 0,
+    0, -20, 1, 5, 0, 1, 0,
+    20, 0, 1, 5, 0, 0, 1,
     0, 1, 20, 0.9, 0,
     0.2, 1, 0,
     0.3, 1, 0,
@@ -48,7 +48,7 @@ describe.each(["training-engine-scalar.wasm", "training-engine-simd.wasm"])("%s"
   it("exposes the stable ABI and completes a seeded generation", async () => {
     const { exports, summary } = await runArtifact(artifact)
     expect(exports.training_generation()).toBe(2)
-    expect(summary).toHaveLength(8)
+    expect(summary).toHaveLength(12)
     expect(summary.every(Number.isFinite)).toBe(true)
   })
 })

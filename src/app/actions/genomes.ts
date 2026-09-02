@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import type { Genome } from "@/core/types/genetics"
-import { Prisma } from "@/generated/prisma"
+import { Prisma } from "@/generated/prisma/client"
 
 export async function saveGenome(
     creatureId: string,

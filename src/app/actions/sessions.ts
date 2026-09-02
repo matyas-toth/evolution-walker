@@ -5,7 +5,7 @@ import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import type { Genome } from "@/core/types/genetics"
 import type { TrainingHubConfig } from "@/core/types/simulation"
-import { Prisma } from "@/generated/prisma"
+import { Prisma } from "@/generated/prisma/client"
 
 export interface SaveSessionPayload {
     creatureId: string

@@ -8,6 +8,8 @@ import {
   offsetTopology,
   validateParticleIds,
   validateTopology,
+  analyzeLocomotion,
+  STICKMAN_TOPOLOGY,
 } from "@/core/topology"
 import { createTestTopology } from "../fixtures/training"
 
@@ -81,5 +83,60 @@ describe("topology validation", () => {
     expect(isConnected(singleton)).toBe(true)
     expect(hasMuscles(singleton)).toBe(false)
     expect(validateParticleIds(createTestTopology()).isValid).toBe(true)
+  })
+})
+
+describe("locomotion analysis", () => {
+  function walker(legXs: number[]) {
+    const topology = createTestTopology()
+    topology.particles = [topology.particles[0], ...legXs.map((x, index) => ({
+      id: `foot-${index}`, initialPos: { x, y: 0 }, mass: 1, radius: 5, isLocked: false,
+    }))]
+    topology.constraints = legXs.map((_, index) => ({
+      id: `bone-${index}`, p1Id: "head", p2Id: `foot-${index}`, restLength: 30, stiffness: 0.9, damping: 0,
+    }))
+    topology.muscles = legXs.map((_, index) => ({
+      id: `muscle-${index}`, p1Id: "head", p2Id: `foot-${index}`, baseLength: 30, stiffness: 0.9, damping: 0,
+    }))
+    return topology
+  }
+
+  it.each([1, 2, 4, 5])("detects %i ordered support groups", count => {
+    const analysis = analyzeLocomotion(walker(Array.from({ length: count }, (_, index) => index * 40)))
+    expect(analysis.supportGroups).toHaveLength(count)
+    expect([...analysis.muscleGroups]).toEqual(Array.from({ length: count }, (_, index) => index))
+  })
+
+  it("groups multi-point feet and honors manual support/body overrides", () => {
+    const topology = walker([-30, -24, 30])
+    let analysis = analyzeLocomotion(topology)
+    expect(analysis.supportGroups).toHaveLength(2)
+    topology.particles[1].locomotionRole = "support"
+    topology.particles[1].gaitGroup = 7
+    topology.particles[2].locomotionRole = "support"
+    topology.particles[2].gaitGroup = 7
+    topology.particles[3].locomotionRole = "body"
+    analysis = analyzeLocomotion(topology)
+    expect(analysis.source).toBe("manual")
+    expect(analysis.supportGroups).toEqual([[1, 2]])
+  })
+
+  it("falls back to the lowest unlocked point when no rigid leaf is available", () => {
+    const topology = walker([0])
+    topology.constraints = []
+    topology.particles[0].locomotionRole = "body"
+    topology.particles[1].locomotionRole = "body"
+    const analysis = analyzeLocomotion(topology)
+    expect(analysis.source).toBe("fallback")
+    expect(analysis.supportGroups).toHaveLength(1)
+  })
+
+  it("assigns the stock stickman's leg muscles to opposing gait groups and leaves its core stabilising", () => {
+    const analysis = analyzeLocomotion(STICKMAN_TOPOLOGY)
+    expect(analysis.supportGroups.map(group => group.map(index => STICKMAN_TOPOLOGY.particles[index].id))).toEqual([
+      ["l-foot"],
+      ["r-foot"],
+    ])
+    expect([...analysis.muscleGroups]).toEqual([0, 1, 0, 1, -1, -1, -1, -1, -1, -1])
   })
 })

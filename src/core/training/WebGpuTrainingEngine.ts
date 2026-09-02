@@ -10,6 +10,8 @@ import type {
 } from "@/core/types"
 import type { EvaluatedGeneration, TrainingBackendEngine } from "./engineBackend"
 import { getTrainingTargetZone, TRAINING_FRAME_RATE, TRAINING_GROUND_Y } from "./world"
+import { analyzeLocomotion, type LocomotionAnalysis } from "@/core/topology/locomotion"
+import { adaptiveMutation, wrapPhase } from "./evolutionPolicy"
 
 const GPU_MAP_READ = 0x0001
 const GPU_COPY_SRC = 0x0004
@@ -102,7 +104,7 @@ fn train(@builtin(global_invocation_id) id: vec3<u32>) {
     let target_distance = params[10];
     let head_index = u32(params[11]);
     let state_base = creature * particle_count * 4u;
-    let metric_base = creature * 8u;
+    let metric_base = creature * 14u;
     let oscillator_base = creature * muscle_count * 4u;
     let replay_meta_index = (total_steps + 1u) * particle_count * 2u;
 
@@ -114,9 +116,15 @@ fn train(@builtin(global_invocation_id) id: vec3<u32>) {
         metrics[metric_base + 4u] = 1.0;
         metrics[metric_base + 5u] = 0.0;
         metrics[metric_base + 6u] = 0.0;
+        metrics[metric_base + 7u] = 0.0;
+        metrics[metric_base + 8u] = 0.0;
+        metrics[metric_base + 9u] = 0.0;
+        metrics[metric_base + 10u] = 0.0;
+        metrics[metric_base + 11u] = 0.0;
+        metrics[metric_base + 12u] = -6.0;
         for (var particle = 0u; particle < particle_count; particle++) {
             let state_index = state_base + particle * 4u;
-            let definition = particle * 6u;
+            let definition = particle * 7u;
             let x = spawn_x + particle_defs[definition];
             let y = spawn_y + particle_defs[definition + 1u];
             state[state_index] = x;
@@ -148,7 +156,7 @@ fn train(@builtin(global_invocation_id) id: vec3<u32>) {
     for (var local_step = 0u; local_step < step_count; local_step++) {
         if (metrics[metric_base + 4u] == 0.0) { break; }
         for (var particle = 0u; particle < particle_count; particle++) {
-            let definition = particle * 6u;
+            let definition = particle * 7u;
             if (particle_defs[definition + 4u] != 0.0) { continue; }
             let index = state_base + particle * 4u;
             let x = state[index];
@@ -183,14 +191,14 @@ fn train(@builtin(global_invocation_id) id: vec3<u32>) {
                 let scale = (distance - target_length) * constraints[definition + 3u] / distance;
                 let correction_x = dx * scale;
                 let correction_y = dy * scale;
-                let mass1 = particle_defs[p1 * 6u + 2u];
-                let mass2 = particle_defs[p2 * 6u + 2u];
+                let mass1 = particle_defs[p1 * 7u + 2u];
+                let mass2 = particle_defs[p2 * 7u + 2u];
                 let total_mass = mass1 + mass2;
-                if (particle_defs[p1 * 6u + 4u] == 0.0) {
+                if (particle_defs[p1 * 7u + 4u] == 0.0) {
                     state[p1_index] += correction_x * mass2 / total_mass;
                     state[p1_index + 1u] += correction_y * mass2 / total_mass;
                 }
-                if (particle_defs[p2 * 6u + 4u] == 0.0) {
+                if (particle_defs[p2 * 7u + 4u] == 0.0) {
                     state[p2_index] -= correction_x * mass1 / total_mass;
                     state[p2_index + 1u] -= correction_y * mass1 / total_mass;
                 }
@@ -200,8 +208,9 @@ fn train(@builtin(global_invocation_id) id: vec3<u32>) {
         var total_mass = 0.0;
         var weighted_x = 0.0;
         var weighted_y = 0.0;
+        var contact_mask = 0u;
         for (var particle = 0u; particle < particle_count; particle++) {
-            let definition = particle * 6u;
+            let definition = particle * 7u;
             let index = state_base + particle * 4u;
             let radius = particle_defs[definition + 3u];
             let maximum_y = ground_y - radius;
@@ -220,8 +229,9 @@ fn train(@builtin(global_invocation_id) id: vec3<u32>) {
             total_mass += mass;
             weighted_x += state[index] * mass;
             weighted_y += state[index + 1u] * mass;
-            if (metrics[metric_base + 5u] == 0.0 && state[index] >= target_distance && state[index] <= target_distance + 100.0 && state[index + 1u] >= ground_y - 100.0 && state[index + 1u] <= ground_y - 20.0) {
-                metrics[metric_base + 5u] = 1.0;
+            let support_group = u32(particle_defs[definition + 6u]);
+            if (support_group > 0u && support_group <= 31u && state[index + 1u] >= maximum_y - 1.0) {
+                contact_mask |= 1u << (support_group - 1u);
             }
         }
         let center_x = weighted_x / total_mass;
@@ -231,8 +241,21 @@ fn train(@builtin(global_invocation_id) id: vec3<u32>) {
         metrics[metric_base + 2u] = max(metrics[metric_base + 2u], center_x);
         let head_y = state[state_base + head_index * 4u + 1u];
         metrics[metric_base + 3u] = min(metrics[metric_base + 3u], head_y);
-        if (head_y >= ground_y - particle_defs[head_index * 6u + 3u]) {
+        if (head_y >= ground_y - particle_defs[head_index * 7u + 3u]) {
             metrics[metric_base + 4u] = 0.0;
+        } else {
+            metrics[metric_base + 7u] += 1.0;
+            metrics[metric_base + 8u] += max(0.0, ground_y - head_y);
+            if (contact_mask == 0u) { metrics[metric_base + 9u] += 1.0; }
+            let absolute_step = current_step + local_step;
+            if (contact_mask != u32(metrics[metric_base + 11u]) && f32(absolute_step) - metrics[metric_base + 12u] >= 6.0) {
+                if (u32(metrics[metric_base + 11u]) != 0u || contact_mask != 0u) { metrics[metric_base + 10u] += 1.0; }
+                metrics[metric_base + 12u] = f32(absolute_step);
+            }
+            metrics[metric_base + 11u] = f32(contact_mask);
+            if (metrics[metric_base + 5u] == 0.0 && center_x >= target_distance && center_x <= target_distance + 100.0 && center_y >= ground_y - 100.0 && center_y <= ground_y - 20.0) {
+                metrics[metric_base + 5u] = 1.0;
+            }
         }
         for (var muscle = 0u; muscle < muscle_count; muscle++) {
             let oscillator = oscillator_base + muscle * 4u;
@@ -259,13 +282,19 @@ fn train(@builtin(global_invocation_id) id: vec3<u32>) {
     }
 
     if (current_step + step_count >= total_steps) {
-        let distance = metrics[metric_base + 2u] - spawn_x;
-        let target_center = target_distance + 50.0;
-        let target_range = max(1.0, abs(target_distance - spawn_x));
-        let target_bonus = select(max(0.0, 1.0 - abs(metrics[metric_base] - target_center) / target_range) * 500.0, 1000.0, metrics[metric_base + 5u] != 0.0);
-        let upright = 50.0 * max(0.0, (ground_y - metrics[metric_base + 3u]) / ground_y);
-        let death = select(-500.0, 0.0, metrics[metric_base + 4u] != 0.0);
-        metrics[metric_base + 6u] = distance + target_bonus + upright + death;
+        let target_range = max(1.0, target_distance - spawn_x);
+        let distance = clamp(metrics[metric_base + 2u] - spawn_x, 0.0, target_range);
+        let progress = distance / target_range;
+        let survival = clamp(metrics[metric_base + 7u] / max(1.0, f32(total_steps)), 0.0, 1.0);
+        let upright = clamp(metrics[metric_base + 8u] / max(1.0, metrics[metric_base + 7u]) / max(1.0, params[13]), 0.0, 1.0);
+        let gait_rate = clamp(metrics[metric_base + 10u] / max(DT, f32(total_steps) * DT), 0.0, 2.0);
+        let airborne = clamp(metrics[metric_base + 9u] / max(1.0, metrics[metric_base + 7u]), 0.0, 1.0);
+        metrics[metric_base + 6u] = distance + 250.0 * sqrt(progress)
+            + 120.0 * survival * (0.25 + 0.75 * upright)
+            + 80.0 * gait_rate * sqrt(progress)
+            - 60.0 * clamp((airborne - 0.35) / 0.65, 0.0, 1.0)
+            - 100.0 * (1.0 - survival)
+            + select(0.0, 1000.0, metrics[metric_base + 5u] != 0.0);
     }
 }
 `
@@ -279,6 +308,7 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
     private config: TrainingEngineConfig
     private readonly muscleIds: string[]
     private readonly random: SeededRandom
+    private readonly locomotion: LocomotionAnalysis
     private readonly genomes: Float32Array
     private readonly state: Float32Array
     private readonly metrics: Float32Array
@@ -297,6 +327,8 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
     private currentStep = 0
     private generation: number
     private generationStartedAt = performance.now()
+    private bestDistanceEver = Number.NEGATIVE_INFINITY
+    private stagnationGenerations = 0
     private bestFitness = Number.NEGATIVE_INFINITY
     private bestGenomeValues: Float32Array | null = null
     private lastEvaluation: EvaluatedGeneration | null = null
@@ -328,6 +360,7 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
         this.device = device
         this.pipeline = pipeline
         this.topology = topology
+        this.locomotion = analyzeLocomotion(topology)
         this.config = config
         this.replayMode = replayMode
         this.generation = initialGeneration
@@ -335,7 +368,7 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
         this.random = new SeededRandom(config.seed)
         this.genomes = this.createGenomes(initialPopulation)
         this.state = new Float32Array(config.populationSize * topology.particles.length * 4)
-        this.metrics = new Float32Array(config.populationSize * 8)
+        this.metrics = new Float32Array(config.populationSize * 14)
         const particleDefinitions = this.createParticleDefinitions()
         const constraints = this.createConstraints()
         const oscillators = new Float32Array(Math.max(1, config.populationSize * topology.muscles.length * 4))
@@ -381,6 +414,7 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
             this.topology.muscles.length, stepCount, this.currentStep, totalSteps,
             600, 100, 570, this.config.targetDistance, this.headIndex(),
             this.replayMode ? 1 : 0,
+            this.locomotion.initialStandingHeight,
         ])
         const startedAt = performance.now()
         if (this.currentStep === 0) this.device.queue.writeBuffer(this.genomeBuffer, 0, this.genomes)
@@ -415,10 +449,10 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
         let totalFitness = 0
         let targetIndex = -1
         for (let creature = 0; creature < this.config.populationSize; creature++) {
-            const fitness = this.metrics[creature * 8 + 6]
+            const fitness = this.metrics[creature * 14 + 6]
             totalFitness += fitness
             if (fitness > bestFitness) { bestFitness = fitness; bestIndex = creature }
-            if (targetIndex < 0 && this.metrics[creature * 8 + 5] !== 0) targetIndex = creature
+            if (targetIndex < 0 && this.metrics[creature * 14 + 5] !== 0) targetIndex = creature
         }
         const stride = this.muscleIds.length * 3
         const bestValues = this.genomes.slice(bestIndex * stride, (bestIndex + 1) * stride)
@@ -426,6 +460,10 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
             ? this.genomes.slice(targetIndex * stride, (targetIndex + 1) * stride)
             : null
         if (bestFitness > this.bestFitness) { this.bestFitness = bestFitness; this.bestGenomeValues = bestValues.slice() }
+        const bestDistance = Math.max(...Array.from({ length: this.config.populationSize }, (_, index) =>
+            Math.max(0, this.metrics[index * 14 + 2] - 100),
+        ))
+        this.updateStagnation(bestDistance)
         this.timings.fitnessMs = performance.now() - startedAt
         const evolutionStarted = performance.now()
         this.evolve()
@@ -446,6 +484,10 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
             targetIndex,
             bestGenome: this.materializeGenome(bestValues, `genome-${evaluatedGeneration}-best`, evaluatedGeneration),
             targetGenome: targetValues ? this.materializeGenome(targetValues, `genome-${evaluatedGeneration}-target`, evaluatedGeneration) : null,
+            bestDistance: Math.max(0, this.metrics[bestIndex * 14 + 2] - 100),
+            bestProgress: Math.max(0, this.metrics[bestIndex * 14 + 2] - 100) / Math.max(1, this.config.targetDistance - 100),
+            bestSurvival: this.metrics[bestIndex * 14 + 7] / Math.max(1, Math.round(this.config.generationDuration * 60)),
+            bestSupportTransitions: this.metrics[bestIndex * 14 + 10],
         }
         return this.lastEvaluation
     }
@@ -565,8 +607,11 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
     }
 
     private createParticleDefinitions(): Float32Array {
-        const values = new Float32Array(this.topology.particles.length * 6)
-        this.topology.particles.forEach((particle, index) => values.set([particle.initialPos.x, particle.initialPos.y, particle.mass, particle.radius, particle.isLocked ? 1 : 0, particle.isHead || particle.id === "head" ? 1 : 0], index * 6))
+        const values = new Float32Array(this.topology.particles.length * 7)
+        const supportByParticle = new Int16Array(this.topology.particles.length)
+        // The contact mask is represented exactly by f32 up to 24 bits in WGSL.
+        this.locomotion.supportGroups.slice(0, 24).forEach((group, groupIndex) => group.forEach((particle) => { supportByParticle[particle] = groupIndex + 1 }))
+        this.topology.particles.forEach((particle, index) => values.set([particle.initialPos.x, particle.initialPos.y, particle.mass, particle.radius, particle.isLocked ? 1 : 0, particle.isHead || particle.id === "head" ? 1 : 0, supportByParticle[index]], index * 7))
         return values
     }
 
@@ -584,25 +629,52 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
     private evolve(): void {
         const population = this.config.populationSize
         const stride = this.muscleIds.length * 3
-        const ranked = Array.from({ length: population }, (_, index) => index).sort((left, right) => this.metrics[right * 8 + 6] - this.metrics[left * 8 + 6])
+        const ranked = Array.from({ length: population }, (_, index) => index).sort((left, right) => this.metrics[right * 14 + 6] - this.metrics[left * 14 + 6])
         const parentCount = Math.max(1, Math.min(population, Math.floor(population * this.config.parentsTopPercent)))
         const next = new Float32Array(this.genomes.length)
         const tournament = () => {
             let best = ranked[Math.floor(this.random.next() * parentCount)]
-            for (let round = 1; round < 3; round++) { const candidate = ranked[Math.floor(this.random.next() * parentCount)]; if (this.metrics[candidate * 8 + 6] > this.metrics[best * 8 + 6]) best = candidate }
+            for (let round = 1; round < 3; round++) { const candidate = ranked[Math.floor(this.random.next() * parentCount)]; if (this.metrics[candidate * 14 + 6] > this.metrics[best * 14 + 6]) best = candidate }
             return best
         }
+        const adaptive = adaptiveMutation(this.config.mutationRate, this.config.mutationStrength, this.stagnationGenerations)
+        const immigrantCount = adaptive.injectImmigrants ? Math.max(1, Math.floor(population * 0.05)) : 0
         for (let child = 0; child < population; child++) {
             if (child < Math.min(population, this.config.elitismCount)) { const source = ranked[child]; next.set(this.genomes.subarray(source * stride, (source + 1) * stride), child * stride); continue }
-            const parent1 = tournament(); const parent2 = tournament(); const bias = this.metrics[parent1 * 8 + 6] >= this.metrics[parent2 * 8 + 6] ? 0.6 : 0.4
-            for (let value = 0; value < stride; value++) {
+            if (child >= population - immigrantCount) { this.seedRhythmicGenome(next, child * stride); continue }
+            const parent1 = tournament(); const parent2 = tournament(); const bias = this.metrics[parent1 * 14 + 6] >= this.metrics[parent2 * 14 + 6] ? 0.6 : 0.4
+            for (let muscle = 0; muscle < this.muscleIds.length; muscle++) {
                 const source = this.random.next() < bias ? parent1 : parent2
-                let result = this.genomes[source * stride + value]
-                if (this.random.next() <= this.config.mutationRate) { result *= 1 + (this.random.next() - 0.5) * 2 * this.config.mutationStrength; result = value % 3 === 0 ? Math.max(0.05, Math.min(0.8, result)) : value % 3 === 1 ? Math.max(0.1, Math.min(5, result)) : Math.max(0, Math.min(Math.PI * 2, result)) }
-                next[child * stride + value] = result
+                const sourceBase = source * stride + muscle * 3
+                const targetBase = child * stride + muscle * 3
+                let amplitude = this.genomes[sourceBase], frequency = this.genomes[sourceBase + 1], phase = this.genomes[sourceBase + 2]
+                if (this.random.next() <= adaptive.rate) {
+                    amplitude = Math.max(0.05, Math.min(0.8, amplitude + (this.random.next() - 0.5) * 0.4 * adaptive.strength))
+                    frequency = Math.max(0.1, Math.min(5, frequency + (this.random.next() - 0.5) * 2 * adaptive.strength))
+                    phase = wrapPhase(phase + (this.random.next() - 0.5) * 2 * Math.PI * adaptive.strength)
+                }
+                next[targetBase] = amplitude; next[targetBase + 1] = frequency; next[targetBase + 2] = phase
             }
         }
         this.genomes.set(next)
+    }
+
+    private updateStagnation(bestDistance: number): void {
+        const threshold = Math.max(1, this.config.targetDistance - 100) * 0.0025
+        if (bestDistance >= this.bestDistanceEver + threshold) { this.bestDistanceEver = bestDistance; this.stagnationGenerations = 0 }
+        else this.stagnationGenerations++
+    }
+
+    private seedRhythmicGenome(target: Float32Array, offset: number): void {
+        const tempo = 0.7 + this.random.next() * 0.8
+        const groupCount = Math.max(1, this.locomotion.supportGroups.length)
+        for (let muscle = 0; muscle < this.muscleIds.length; muscle++) {
+            const group = this.locomotion.muscleGroups[muscle]
+            const base = offset + muscle * 3
+            target[base] = group >= 0 ? 0.18 + this.random.next() * 0.34 : 0.05 + this.random.next() * 0.15
+            target[base + 1] = Math.max(0.1, Math.min(5, tempo + (this.random.next() - 0.5) * 0.12))
+            target[base + 2] = wrapPhase((group >= 0 ? Math.PI * 2 * group / groupCount : 0) + (this.random.next() - 0.5) * 0.24)
+        }
     }
 
     private materializeGenome(values: Float32Array, id: string, generation: number): Genome {
@@ -611,12 +683,12 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
     }
 
     private createRenderSnapshot(maximum: number): TrainingSnapshot["render"] {
-        const ranked = Array.from({ length: this.config.populationSize }, (_, index) => index).sort((left, right) => this.metrics[right * 8] - this.metrics[left * 8])
+        const ranked = Array.from({ length: this.config.populationSize }, (_, index) => index).sort((left, right) => this.metrics[right * 14] - this.metrics[left * 14])
         const creatureCount = Math.min(maximum, this.config.populationSize)
         const particleCount = this.topology.particles.length
         const positions = new Float32Array(creatureCount * particleCount * 2)
         const centers = new Float32Array(creatureCount * 2)
-        for (let output = 0; output < creatureCount; output++) { const creature = ranked[output]; centers[output * 2] = this.metrics[creature * 8]; centers[output * 2 + 1] = this.metrics[creature * 8 + 1]; for (let particle = 0; particle < particleCount; particle++) { const source = (creature * particleCount + particle) * 4; const target = (output * particleCount + particle) * 2; positions[target] = this.state[source]; positions[target + 1] = this.state[source + 1] } }
+        for (let output = 0; output < creatureCount; output++) { const creature = ranked[output]; centers[output * 2] = this.metrics[creature * 14]; centers[output * 2 + 1] = this.metrics[creature * 14 + 1]; for (let particle = 0; particle < particleCount; particle++) { const source = (creature * particleCount + particle) * 4; const target = (output * particleCount + particle) * 2; positions[target] = this.state[source]; positions[target + 1] = this.state[source + 1] } }
         return { creatureCount, particleCount, positions, centers }
     }
 }

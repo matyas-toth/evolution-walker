@@ -111,5 +111,6 @@ export function resolveTrainingEngineConfig(config: TrainingHubConfig): Training
         seed: config.seed ?? 0x6d2b79f5,
         workerCount: config.workerCount ?? "auto",
         snapshotHz: Math.max(1, Math.min(30, config.snapshotHz ?? 5)),
+        evolutionPolicyVersion: 2,
     }
 }

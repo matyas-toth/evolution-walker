@@ -8,6 +8,11 @@ export interface EvaluatedGeneration {
     targetIndex: number
     bestGenome: Genome
     targetGenome: Genome | null
+    bestDistance?: number
+    bestProgress?: number
+    bestSurvival?: number
+    bestSupportTransitions?: number
+    hasWalkingCandidate?: boolean
 }
 
 /** Common contract shared by worker-local CPU, WASM, and GPU engines. */

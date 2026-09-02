@@ -8,7 +8,7 @@ import { NextResponse } from "next/server"
 import bcrypt from "bcryptjs"
 import { z } from "zod"
 import { prisma } from "@/lib/prisma"
-import { Prisma } from "../../../../generated/prisma"
+import { Prisma } from "@/generated/prisma/client"
 import { STICKMAN_TOPOLOGY } from "@/core/topology"
 
 const registerSchema = z.object({

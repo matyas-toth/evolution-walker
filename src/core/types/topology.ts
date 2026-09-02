@@ -27,6 +27,12 @@ export interface TopologyParticle {
   
   /** Whether this particle is designated as the creature's head */
   isHead?: boolean;
+
+  /** Optional locomotion override. Missing means automatic detection. */
+  locomotionRole?: 'support' | 'body';
+
+  /** Optional manual support/leg group. Equal values move in the same phase. */
+  gaitGroup?: number;
 }
 
 /**

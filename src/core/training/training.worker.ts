@@ -14,6 +14,7 @@ import type {
     TrainingEvent,
     TrainingSnapshot,
 } from "@/core/types"
+import { createSeededInitialPopulation } from "@/core/genetics/population"
 
 const workerScope: DedicatedWorkerGlobalScope = self as unknown as DedicatedWorkerGlobalScope
 const PHYSICS_CHUNK_STEPS = 24
@@ -90,8 +91,9 @@ async function selectAutoBackend(): Promise<ActiveTrainingBackend> {
         return performance.now() - startedAt
     }
     try {
-        const cpu = await RustWasmTrainingEngine.create(topology, warmupConfig, undefined, 1, "wasm-simd")
-        const gpu = await WebGpuTrainingEngine.create(topology, { ...warmupConfig, backend: "webgpu" }, undefined, 1)
+        const warmupPopulation = createSeededInitialPopulation(topology, warmupConfig.populationSize, warmupConfig.seed, 1)
+        const cpu = await RustWasmTrainingEngine.create(topology, warmupConfig, warmupPopulation, 1, "wasm-simd")
+        const gpu = await WebGpuTrainingEngine.create(topology, { ...warmupConfig, backend: "webgpu" }, warmupPopulation, 1)
         const cpuMs = await benchmark(cpu)
         const gpuMs = await benchmark(gpu)
         return cpuMs / gpuMs >= 1.5 ? "webgpu" : "wasm-simd"
@@ -103,6 +105,9 @@ async function selectAutoBackend(): Promise<ActiveTrainingBackend> {
 /** Builds a fresh persistent engine from the latest serializable inputs. */
 async function initializeEngine(emitReady = true): Promise<void> {
     if (!topology || !config) return
+    if (!initialPopulation) {
+        initialPopulation = createSeededInitialPopulation(topology, config.populationSize, config.seed, initialGeneration)
+    }
     droppedSnapshots = 0
     pendingGeneration = null
     activeBackend = config.backend === "auto" ? await selectAutoBackend() : await resolveBackend(config.backend)

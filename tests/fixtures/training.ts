@@ -59,8 +59,8 @@ export function createTrainingConfig(overrides: Partial<TrainingEngineConfig> = 
   return {
     populationSize: 8,
     generationDuration: 0.1,
-    mutationRate: 0.12,
-    mutationStrength: 0.42,
+    mutationRate: 0.15,
+    mutationStrength: 0.28,
     elitismCount: 1,
     parentsTopPercent: 0.5,
     targetDistance: 1_400,
@@ -70,6 +70,7 @@ export function createTrainingConfig(overrides: Partial<TrainingEngineConfig> = 
     seed: 12345,
     workerCount: 1,
     snapshotHz: 5,
+    evolutionPolicyVersion: 2,
     ...overrides,
   }
 }

@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { Topology, TopologyParticle, TopologyConstraint, TopologyMuscle } from "@/core/types"
 import type { SelectedElement, EditorTool } from "@/hooks/useEditorState"
 
@@ -107,6 +108,32 @@ export function PropertiesPanel({
                             disabled={particle.isHead}
                         />
                     </div>
+                    <div className="flex flex-col gap-1.5 pt-1">
+                        <Label className="text-xs text-muted-foreground">Mozgási szerep</Label>
+                        <Select
+                            value={particle.locomotionRole ?? "auto"}
+                            onValueChange={(value) => onUpdateParticle(particle.id, {
+                                locomotionRole: value === "auto" ? undefined : value as "support" | "body",
+                                gaitGroup: value === "support" ? particle.gaitGroup : undefined,
+                            })}
+                        >
+                            <SelectTrigger className="w-full" size="sm"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="auto">Auto</SelectItem>
+                                <SelectItem value="support">Támasz / láb</SelectItem>
+                                <SelectItem value="body">Testpont</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    {particle.locomotionRole === "support" ? (
+                        <NumberField
+                            label="Járáscsoport (opcionális)"
+                            value={particle.gaitGroup ?? 0}
+                            onChange={(gaitGroup) => onUpdateParticle(particle.id, { gaitGroup: Math.max(0, Math.round(gaitGroup)) })}
+                            min={0}
+                            step={1}
+                        />
+                    ) : null}
                 </div>
             </div>
         )

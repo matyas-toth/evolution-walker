@@ -6,6 +6,7 @@ import {
   calculateFitnessAdvanced,
   createInitialPopulation,
   createRandomGenome,
+  createSeededInitialPopulation,
   mutateGenome,
   sbxCrossover,
   selectElites,
@@ -15,6 +16,7 @@ import {
   uniformCrossover,
   uniformCrossoverWithBias,
 } from "@/core/genetics"
+import { adaptiveMutation, calculateFitnessV2 } from "@/core/training/evolutionPolicy"
 import { createCreature, createGenome, createTestTopology } from "../fixtures/training"
 
 afterEach(() => vi.restoreAllMocks())
@@ -48,6 +50,26 @@ describe("population and mutation", () => {
       expect(result.genes[0].amplitude).toBeGreaterThanOrEqual(0.05)
       expect(result.genes[0].amplitude).toBeLessThanOrEqual(0.8)
     }))
+  })
+
+  it("creates a deterministic 60/40 gait-prior mix without collapsing diversity", () => {
+    const topology = createTestTopology()
+    const first = createSeededInitialPopulation(topology, 10, 42)
+    const second = createSeededInitialPopulation(topology, 10, 42)
+    expect(first).toEqual(second)
+    expect(first.slice(0, 6).every(genome => genome.genes[0].frequency >= 0.64 && genome.genes[0].frequency <= 1.56)).toBe(true)
+    expect(new Set(first.map(genome => genome.genes[0].phase.toFixed(4))).size).toBeGreaterThan(5)
+  })
+
+  it("wraps phase mutation cyclically and computes plateau boosts", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.999)
+    const genome = createGenome({ genes: [{ muscleId: "muscle", amplitude: 0.5, frequency: 1, phase: Math.PI * 2 - 0.01 }] })
+    const phase = mutateGenome(genome, 1, 1).genes[0].phase
+    expect(phase).toBeGreaterThanOrEqual(0)
+    expect(phase).toBeLessThan(Math.PI * 2)
+    expect(adaptiveMutation(0.15, 0.28, 40)).toMatchObject({ rate: 0.15, strength: 0.28, injectImmigrants: false })
+    expect(adaptiveMutation(0.15, 0.28, 120)).toMatchObject({ rate: 0.25, strength: 0.5 })
+    expect(adaptiveMutation(0.15, 0.28, 160).injectImmigrants).toBe(true)
   })
 })
 
@@ -153,6 +175,16 @@ describe("fitness", () => {
     const nearby = createCreature(0, { currentPos: { x: 250, y: 550 }, minHeadY: undefined })
     expect(calculateFitnessAdvanced(nearby, zone, 100, 600).targetBonus).toBe(500)
     expect(calculateFitnessAdvanced(nearby, zone, 100, 600).stability).toBeGreaterThan(0)
+  })
+
+  it("rewards moving survivors and gait while avoiding a binary death cliff", () => {
+    const still = calculateFitnessV2({ maxCenterX: 100, spawnX: 100, targetX: 1400, aliveFrames: 600, totalFrames: 600, headHeightSum: 12_000, initialStandingHeight: 20, supportAirFrames: 0, supportTransitions: 0, generationDuration: 10, reachedTarget: false })
+    const movingMetrics = { maxCenterX: 400, spawnX: 100, targetX: 1400, aliveFrames: 360, totalFrames: 600, headHeightSum: 7_200, initialStandingHeight: 20, supportAirFrames: 80, supportTransitions: 8, generationDuration: 10, reachedTarget: false }
+    const movingFall = calculateFitnessV2(movingMetrics)
+    const hopping = calculateFitnessV2({ maxCenterX: 110, spawnX: 100, targetX: 1400, aliveFrames: 600, totalFrames: 600, headHeightSum: 12_000, initialStandingHeight: 20, supportAirFrames: 500, supportTransitions: 30, generationDuration: 10, reachedTarget: false })
+    expect(movingFall.total).toBeGreaterThan(still.total)
+    expect(hopping.total).toBeLessThan(movingFall.total)
+    expect(calculateFitnessV2({ ...movingMetrics, maxCenterX: 1400, reachedTarget: true }).total).toBeGreaterThan(movingFall.total + 1000)
   })
 })
 

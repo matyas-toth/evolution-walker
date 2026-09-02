@@ -7,6 +7,8 @@
 export {
   createRandomGenome,
   createInitialPopulation,
+  createSeededInitialPopulation,
+  SeededRandom,
 } from './population';
 
 // Fitness calculation
