@@ -16,9 +16,9 @@ export default defineConfig({
     video: "retain-on-failure",
   },
   webServer: {
-    command: process.env.CI
-      ? "npm run start -- --hostname 127.0.0.1 --port 3100"
-      : "npm run dev -- --hostname 127.0.0.1 --port 3100",
+    // A production server can run beside an active `next dev` process. Next.js 16
+    // permits only one development server per checkout, regardless of its port.
+    command: "npm run start -- --hostname 127.0.0.1 --port 3100",
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

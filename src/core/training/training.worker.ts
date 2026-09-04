@@ -343,7 +343,13 @@ async function handleCommand(command: TrainingCommand): Promise<void> {
                 initialPopulation = undefined
                 initialGeneration = 1
                 if (config) config = { ...config, policyState: undefined }
-                await initializeEngine()
+                await initializeEngine(false)
+                if (engine && config) {
+                    const resetSnapshot = engine.getSnapshot("idle", false)
+                    resetSnapshot.generation = 0
+                    decorateSnapshot(resetSnapshot)
+                    emit({ type: "ready", snapshot: resetSnapshot })
+                }
                 break
             case "updateConfig": {
                 const previousConfig = config

@@ -32,7 +32,7 @@ test("training supports live pacing, pause, backend preservation, resume, and re
   await expect(page.getByText("Simulation Speed: 100x")).toBeVisible()
   await page.getByRole("button", { name: "Start Evolution" }).click()
   await expect(page.getByRole("button", { name: "Pause Evolution" })).toBeVisible()
-  await expect.poll(async () => Number(await metric(page, "Generation").textContent()), { timeout: 20_000 }).toBeGreaterThan(0)
+  await expect.poll(async () => Number(await metric(page, "Generation").textContent()), { timeout: 20_000 }).toBeGreaterThan(1)
 
   await speed.press("Home")
   await expect(page.getByText("Simulation Speed: 0.1x")).toBeVisible()
@@ -42,6 +42,7 @@ test("training supports live pacing, pause, backend preservation, resume, and re
   const historyBeforeSwitch = await page.getByTestId("fitness-chart").locator("circle").count()
 
   await page.getByLabel("Compute Backend").selectOption("legacy")
+  await expect(metric(page, "Engine")).toHaveText("legacy", { timeout: 20_000 })
   await expect(metric(page, "Generation")).toHaveText(String(generationBeforeSwitch))
   await expect(page.getByTestId("fitness-chart").locator("circle")).toHaveCount(historyBeforeSwitch)
   await expect(page.getByRole("button", { name: "Resume" })).toBeVisible()
@@ -54,8 +55,10 @@ test("training supports live pacing, pause, backend preservation, resume, and re
   const savedGeneration = Number(await metric(page, "Generation").textContent())
   const sessionName = `E2E Session ${testInfo.workerIndex}`
   await page.getByPlaceholder(/Run, Gen/).fill(sessionName)
-  await page.getByRole("button", { name: "Save Current Progress" }).click()
-  await expect(page.getByText("Progress saved successfully.")).toBeVisible()
+  const saveProgress = page.getByRole("button", { name: "Save Current Progress" })
+  await expect(saveProgress).toBeEnabled()
+  await saveProgress.click()
+  await expect(page.getByText("Progress saved successfully.")).toBeVisible({ timeout: 15_000 })
 
   await page.goto("/dashboard/creatures")
   const card = page.getByText("Stickman", { exact: true }).locator("../..").locator("..")

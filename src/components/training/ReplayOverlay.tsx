@@ -173,7 +173,9 @@ export function ReplayOverlay({
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center animate-in fade-in duration-700 bg-background/95">
             <Card className="w-full max-w-xl shadow-xl border-border/50 bg-card/50">
                 <CardHeader className="text-center pb-4 pt-0">
-                    <CardTitle className="text-2xl font-semibold tracking-tight">Target Distance Reached</CardTitle>
+                    <CardTitle role="heading" aria-level={2} className="text-2xl font-semibold tracking-tight">
+                        Target Distance Reached
+                    </CardTitle>
                     <CardDescription className="text-xs uppercase tracking-wider mt-1">
                         Generation {generation}
                     </CardDescription>

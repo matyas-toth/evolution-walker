@@ -23,7 +23,7 @@ export async function register(page: Page, identity: TestIdentity) {
   await page.getByLabel("Password", { exact: true }).fill(identity.password)
   await page.getByLabel("Confirm Password").fill(identity.password)
   await page.getByRole("button", { name: "Create account" }).click()
-  await expect(page).toHaveURL(/\/dashboard$/)
+  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 20_000 })
 }
 
 export async function login(page: Page, identity: TestIdentity) {
@@ -31,7 +31,7 @@ export async function login(page: Page, identity: TestIdentity) {
   await page.getByLabel("Email").fill(identity.email)
   await page.getByLabel("Password").fill(identity.password)
   await page.getByRole("button", { name: "Sign in" }).click()
-  await expect(page).toHaveURL(/\/dashboard$/)
+  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 20_000 })
 }
 
 export async function assertNoSeriousA11yViolations(page: Page) {

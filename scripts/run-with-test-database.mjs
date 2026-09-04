@@ -26,6 +26,7 @@ if (!requestedCommand) {
 
 let container
 let stopping = false
+let phase = "starting the MariaDB container"
 
 async function stopContainer() {
   if (stopping || !container) return
@@ -49,7 +50,10 @@ try {
       MARIADB_ROOT_PASSWORD: "root_test_password",
     })
     .withExposedPorts(3306)
-      .withWaitStrategy(Wait.forLogMessage(/ready for connections/i))
+    // The image reports readiness once for its temporary initialization server,
+    // shuts that server down, and then reports readiness for the real server.
+    .withWaitStrategy(Wait.forLogMessage(/ready for connections/i, 2))
+    .withStartupTimeout(120_000)
     .start()
 
   const host = container.getHost()
@@ -65,10 +69,16 @@ try {
     AUTH_URL: "http://127.0.0.1:3100",
   }
 
+  phase = "applying Prisma migrations"
   await run("npx", ["prisma", "migrate", "deploy"], environment)
+  phase = `running ${requestedCommand}`
   await run(requestedCommand, requestedArguments, environment)
 } catch (error) {
-  console.error("Disposable MariaDB test environment failed. Ensure Docker Desktop or another Docker-compatible runtime is running.")
+  if (!container) {
+    console.error("Could not start the disposable MariaDB test environment. Ensure Docker Desktop or another Docker-compatible runtime is running.")
+  } else {
+    console.error(`Disposable MariaDB test environment failed while ${phase}.`)
+  }
   console.error(error instanceof Error ? error.stack : error)
   process.exitCode = 1
 } finally {

@@ -198,8 +198,14 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
         <div className="flex flex-col h-screen overflow-hidden bg-background">
             <div className="flex items-center justify-between h-14 px-4 border-b border-border bg-card shrink-0 shadow-sm z-10">
                 <div className="flex items-center gap-3">
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => router.push(`/dashboard/creatures/${creatureId}/edit`)}>
-                        <ArrowLeft className="h-4 w-4" />
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-8"
+                        aria-label="Back to creature editor"
+                        onClick={() => router.push(`/dashboard/creatures/${creatureId}/edit`)}
+                    >
+                        <ArrowLeft data-icon="inline-start" />
                     </Button>
                     <div className="flex flex-col">
                         <h1 className="text-sm font-semibold">{creatureName}</h1>
