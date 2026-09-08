@@ -30,6 +30,13 @@
     "db:generate": "prisma generate",
     "db:migrate:dev": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
+    "db:up": "docker compose -f compose.dev.yml up -d",
+    "db:down": "docker compose -f compose.dev.yml down",
+    "db:restart": "docker compose -f compose.dev.yml restart db",
+    "db:logs": "docker compose -f compose.dev.yml logs -f db",
+    "db:status": "docker compose -f compose.dev.yml ps",
+    "db:shell": "docker compose -f compose.dev.yml exec db mariadb -uapp -papp app",
+    "db:reset": "docker compose -f compose.dev.yml down -v && docker compose -f compose.dev.yml up -d",
     "setup": "run-s db:generate build:engine",
     "start": "next start"
   },
