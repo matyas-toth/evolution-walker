@@ -10,7 +10,7 @@ import type {
     TrainingSnapshot,
     TrainingStageTimings,
 } from "@/core/types"
-import type { EvaluatedGeneration, TrainingBackendEngine } from "./engineBackend"
+import { selectTopIndices, type EvaluatedGeneration, type TrainingBackendEngine } from "./engineBackend"
 import { captureReplayFrames } from "./replayCapture"
 import { analyzeLocomotion } from "@/core/topology/locomotion"
 import {
@@ -194,6 +194,7 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
     private generationStartedAt = 0
     private completedGenerationTimes: number[] = []
     private readonly policy: EvolutionPolicyV3
+    private disposed = false
 
     constructor(
         topology: Topology,
@@ -362,7 +363,7 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
             bestFitness: Number.isFinite(this.bestFitness) ? this.bestFitness : 0,
             averageFitness: this.lastEvaluated?.averageFitness ?? 0,
             diagnostics: {
-                backend: "wasm-scalar",
+                backend: this.config.backend === "legacy" ? "legacy" : "wasm-scalar",
                 workerCount: 1,
                 generationsPerSecond: averageDuration > 0 ? 1000 / averageDuration : 0,
                 stageTimings: { ...this.timings },
@@ -424,11 +425,47 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
             [genome],
             genome.generation,
         )
-        return captureReplayFrames(replayEngine, this.topologyDefinition, replayConfig, genome, backend)
+        try {
+            return await captureReplayFrames(replayEngine, this.topologyDefinition, replayConfig, genome, backend)
+        } finally {
+            replayEngine.dispose()
+        }
     }
 
     dispose(): void {
-        // Typed arrays are released with this worker-owned engine instance.
+        if (this.disposed) return
+        this.disposed = true
+        this.policy.dispose()
+        this.genomes = new Float32Array()
+        this.genomeIds = new Uint32Array()
+        this.parentA = new Uint32Array()
+        this.parentB = new Uint32Array()
+        this.x = new Float32Array()
+        this.y = new Float32Array()
+        this.oldX = new Float32Array()
+        this.oldY = new Float32Array()
+        this.alive = new Uint8Array()
+        this.reachedTarget = new Uint8Array()
+        this.firstContactStep = new Int32Array()
+        this.currentX = new Float32Array()
+        this.currentY = new Float32Array()
+        this.maxDistance = new Float32Array()
+        this.minHeadY = new Float32Array()
+        this.aliveFrames = new Uint32Array()
+        this.headHeightSum = new Float32Array()
+        this.supportAirFrames = new Uint32Array()
+        this.supportTransitions = new Uint16Array()
+        this.supportContactMask = new Uint32Array()
+        this.lastSupportTransitionFrame = new Int32Array()
+        this.lastGroundedGroup = new Int16Array()
+        this.fitness = new Float32Array()
+        this.oscillatorSin = new Float32Array()
+        this.oscillatorCos = new Float32Array()
+        this.oscillatorStepSin = new Float32Array()
+        this.oscillatorStepCos = new Float32Array()
+        this.bestGenome = null
+        this.lastEvaluated = null
+        this.completedGenerationTimes.length = 0
     }
 
     private initializeGenomes(initialPopulation?: Genome[]): void {
@@ -666,9 +703,8 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
     }
 
     private createRenderSnapshot(count: number): TrainingSnapshot["render"] {
-        const ranked = Array.from({ length: this.populationSize }, (_, index) => index)
-        ranked.sort((left, right) => this.currentX[right] - this.currentX[left])
-        const creatureCount = Math.min(count, this.populationSize)
+        const ranked = selectTopIndices(this.populationSize, count, (index) => this.currentX[index])
+        const creatureCount = ranked.length
         const positions = new Float32Array(creatureCount * this.topology.particleCount * 2)
         const centers = new Float32Array(creatureCount * 2)
         for (let output = 0; output < creatureCount; output++) {

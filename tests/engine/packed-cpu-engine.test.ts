@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { PackedCpuTrainingEngine } from "@/core/training/packedCpuEngine"
 import { createGenome, createTestTopology, createTrainingConfig } from "../fixtures/training"
 
@@ -54,7 +54,10 @@ describe("PackedCpuTrainingEngine", () => {
     const config = createTrainingConfig({ populationSize: 1, targetDistance: 100 })
     const genome = createGenome()
     const engine = new PackedCpuTrainingEngine(createTestTopology(), config, [genome], 8)
+    const dispose = vi.spyOn(PackedCpuTrainingEngine.prototype, "dispose")
     const replay = await engine.createReplay(genome)
+    expect(dispose).toHaveBeenCalledOnce()
+    dispose.mockRestore()
     expect(replay.reachedFrame).toBe(0)
     expect(replay.frameCount).toBe(1)
     expect(replay.positions).toHaveLength(replay.particleCount * 2)
@@ -95,6 +98,9 @@ describe("PackedCpuTrainingEngine", () => {
     expect(evaluated.generation).toBe(1)
     expect(Number.isFinite(evaluated.bestFitness)).toBe(true)
     expect(engine.exportState().population).toHaveLength(2_000)
+    expect(engine.getSnapshot("paused", false).diagnostics.memoryBytes).toBeGreaterThan(0)
     engine.dispose()
+    expect(engine.getSnapshot("paused", false).diagnostics.memoryBytes).toBe(0)
+    expect(() => engine.dispose()).not.toThrow()
   })
 })

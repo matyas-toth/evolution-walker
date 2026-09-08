@@ -2,12 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createSeededInitialPopulation } from "@/core/genetics/population"
 import { MulticoreWasmTrainingEngine } from "@/core/training/MulticoreWasmTrainingEngine"
 import { createTestTopology, createTrainingConfig } from "../fixtures/training"
+import type { TrainingSnapshot } from "@/core/types"
 
 class FakeShardWorker {
   static instances: FakeShardWorker[] = []
   static failingInitialization = -1
   static hangingInitialization = -1
   static crashingCommand = ""
+  static snapshotResponses = false
   readonly index: number
   onmessage: ((event: MessageEvent<Record<string, unknown>>) => void) | null = null
   onerror: ((event: ErrorEvent) => void) | null = null
@@ -28,6 +30,32 @@ class FakeShardWorker {
         this.onerror?.({ message: "shard crashed" } as ErrorEvent)
         return
       }
+      if (command.type === "run" && FakeShardWorker.snapshotResponses) {
+        const center = this.index * 100
+        const snapshot: TrainingSnapshot = {
+          phase: "running",
+          generation: 1,
+          progress: 10,
+          bestFitness: 0,
+          averageFitness: 0,
+          diagnostics: {
+            backend: "wasm-simd",
+            workerCount: 1,
+            generationsPerSecond: 0,
+            stageTimings: { initializeMs: 0, simulationMs: 0, fitnessMs: 0, evolutionMs: 0, resetMs: 0, transferMs: 0, totalGenerationMs: 0 },
+            droppedSnapshots: 0,
+            memoryBytes: 100,
+          },
+          render: {
+            creatureCount: 2,
+            particleCount: 2,
+            positions: new Float32Array([center, 0, center, 1, center + 1, 0, center + 1, 1]),
+            centers: new Float32Array([center, 0, center + 1, 0]),
+          },
+        }
+        this.onmessage?.({ data: { id: command.id, progress: 10, completed: false, snapshot } } as unknown as MessageEvent<Record<string, unknown>>)
+        return
+      }
       if (command.type === "init" && this.index === FakeShardWorker.failingInitialization) {
         this.onmessage?.({ data: { id: command.id, error: "initialization failed" } } as unknown as MessageEvent<Record<string, unknown>>)
       } else {
@@ -44,6 +72,7 @@ beforeEach(() => {
   FakeShardWorker.failingInitialization = -1
   FakeShardWorker.hangingInitialization = -1
   FakeShardWorker.crashingCommand = ""
+  FakeShardWorker.snapshotResponses = false
   vi.stubGlobal("Worker", FakeShardWorker)
 })
 
@@ -118,5 +147,19 @@ describe("MulticoreWasmTrainingEngine lifecycle", () => {
       engine.dispose()
       expect(created.every((worker) => worker.terminated)).toBe(true)
     }
+  })
+
+  it("merges the global top five render candidates instead of one per shard", async () => {
+    FakeShardWorker.snapshotResponses = true
+    const topology = createTestTopology()
+    const config = createTrainingConfig({ populationSize: 130, workerCount: 3, backend: "wasm-simd" })
+    const engine = await MulticoreWasmTrainingEngine.create(topology, config, undefined, 1, "wasm-simd")
+
+    await engine.runChunk(1, 10)
+    const render = engine.getSnapshot("running", true).render
+
+    expect(render?.creatureCount).toBe(5)
+    expect(Array.from(render?.centers ?? []).filter((_, index) => index % 2 === 0)).toEqual([201, 200, 101, 100, 1])
+    engine.dispose()
   })
 })

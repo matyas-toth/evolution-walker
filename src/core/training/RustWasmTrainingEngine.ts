@@ -11,7 +11,7 @@ import type {
     EvolutionPolicyState,
     PackedCandidateMetrics,
 } from "@/core/types"
-import type { EvaluatedGeneration, TrainingBackendEngine } from "./engineBackend"
+import { selectTopIndices, type EvaluatedGeneration, type TrainingBackendEngine } from "./engineBackend"
 import { captureReplayFrames } from "./replayCapture"
 import { analyzeLocomotion } from "@/core/topology/locomotion"
 import { EvolutionPolicyV3 } from "./EvolutionPolicyV3"
@@ -82,7 +82,7 @@ class SeededRandom {
 
 /** Rust/WASM training backend using a raw flat-buffer ABI and persistent linear memory. */
 export class RustWasmTrainingEngine implements TrainingBackendEngine {
-    private readonly exports: TrainingWasmExports
+    private exports: TrainingWasmExports | null
     private readonly topology: Topology
     private config: TrainingEngineConfig
     private readonly backend: ActiveTrainingBackend
@@ -99,6 +99,7 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
     private readonly externalEvolution: boolean
     private lastEvaluation: EvaluatedGeneration | null = null
     private lastBatch: WasmEvaluationBatch | null = null
+    private disposed = false
 
     static async create(
         topology: Topology,
@@ -170,7 +171,7 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
     updateConfig(config: TrainingEngineConfig): void {
         this.config = config
         this.policy.updateConfig(config)
-        this.exports.training_update_config(
+        this.wasm().training_update_config(
             config.mutationRate,
             config.mutationStrength,
             config.elitismCount,
@@ -180,18 +181,18 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
     }
 
     getGeneration(): number {
-        return this.exports.training_generation()
+        return this.wasm().training_generation()
     }
 
     getProgress(): number {
-        return this.exports.training_progress()
+        return this.wasm().training_progress()
     }
 
     runChunk(maxSteps: number, budgetMs: number): boolean {
         const startedAt = performance.now()
         let completed = false
         do {
-            completed = this.exports.training_run_steps(maxSteps) !== 0
+            completed = this.wasm().training_run_steps(maxSteps) !== 0
         } while (this.config.backgroundMode && !completed && performance.now() - startedAt < budgetMs)
         const elapsed = performance.now() - startedAt
         this.lastSimulationMs += elapsed
@@ -202,7 +203,8 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
     finishGeneration(): EvaluatedGeneration {
         const startedAt = performance.now()
         const generation = this.getGeneration()
-        const evaluatedValues = this.readSlice(this.exports.training_genomes_ptr(), this.exports.training_genomes_len())
+        const exports = this.wasm()
+        const evaluatedValues = this.readSlice(exports.training_genomes_ptr(), exports.training_genomes_len())
         const stride = this.muscleIds.length * 3
         const evaluatedPopulation = Array.from({ length: this.populationSize }, (_, creature) =>
             this.materializeGenome(
@@ -211,11 +213,11 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
                 generation,
             ),
         )
-        this.exports.training_evaluate_generation()
-        const summary = this.readSlice(this.exports.training_summary_ptr(), this.exports.training_summary_len())
+        exports.training_evaluate_generation()
+        const summary = this.readSlice(exports.training_summary_ptr(), exports.training_summary_len())
         const metrics = {
             populationSize: this.populationSize,
-            values: this.readSlice(this.exports.training_evaluation_metrics_ptr(), this.exports.training_evaluation_metrics_len()),
+            values: this.readSlice(exports.training_evaluation_metrics_ptr(), exports.training_evaluation_metrics_len()),
         }
         this.lastBatch = { population: evaluatedPopulation, metrics }
         const transitionMs = performance.now() - startedAt
@@ -286,7 +288,7 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
                 generationsPerSecond: averageDuration ? 1000 / averageDuration : 0,
                 stageTimings: { ...this.timings },
                 droppedSnapshots: 0,
-                memoryBytes: this.exports.memory.buffer.byteLength,
+                memoryBytes: this.wasm().memory.buffer.byteLength,
                 policyVersion: 3,
                 bestDistance: this.lastEvaluation?.bestDistance ?? policyDiagnostics.bestDistance,
                 medianDistance: this.lastEvaluation?.medianDistance,
@@ -305,7 +307,8 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
     }
 
     exportState(): TrainingEngineState {
-        const values = this.readSlice(this.exports.training_genomes_ptr(), this.exports.training_genomes_len())
+        const exports = this.wasm()
+        const values = this.readSlice(exports.training_genomes_ptr(), exports.training_genomes_len())
         const stride = this.muscleIds.length * 3
         const generation = this.getGeneration()
         const population = Array.from({ length: this.populationSize }, (_, creature) =>
@@ -341,10 +344,11 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
                 values[cursor++] = gene?.phase ?? 0
             }
         }
-        const pointer = this.exports.training_alloc_f32(values.length)
-        new Float32Array(this.exports.memory.buffer, pointer, values.length).set(values)
-        const installed = this.exports.training_install_genomes(pointer, values.length)
-        this.exports.training_dealloc_f32(pointer, values.length)
+        const exports = this.wasm()
+        const pointer = exports.training_alloc_f32(values.length)
+        new Float32Array(exports.memory.buffer, pointer, values.length).set(values)
+        const installed = exports.training_install_genomes(pointer, values.length)
+        exports.training_dealloc_f32(pointer, values.length)
         if (!installed) throw new Error("WASM engine rejected the evolved population")
     }
 
@@ -371,7 +375,16 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
     }
 
     dispose(): void {
-        this.exports.training_dispose()
+        const exports = this.exports
+        if (this.disposed || !exports) return
+        this.disposed = true
+        exports.training_dispose()
+        this.exports = null
+        this.policy.dispose()
+        this.lastBatch = null
+        this.lastEvaluation = null
+        this.bestGenome = null
+        this.generationDurations.length = 0
     }
 
     private createInput(initialPopulation: Genome[] | undefined, initialGeneration: number): Float32Array {
@@ -450,7 +463,7 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
 
     private readSlice(pointer: number, length: number): Float32Array {
         if (!pointer || !length) return new Float32Array()
-        return new Float32Array(this.exports.memory.buffer, pointer, length).slice()
+        return new Float32Array(this.wasm().memory.buffer, pointer, length).slice()
     }
 
     private materializeGenome(values: Float32Array, id: string, generation: number): Genome {
@@ -464,13 +477,13 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
     }
 
     private createRenderSnapshot(maximum: number): TrainingSnapshot["render"] {
-        const x = this.readSlice(this.exports.training_x_ptr(), this.exports.training_x_len())
-        const y = this.readSlice(this.exports.training_y_ptr(), this.exports.training_y_len())
-        const centerX = this.readSlice(this.exports.training_center_x_ptr(), this.exports.training_center_x_len())
-        const centerY = this.readSlice(this.exports.training_center_y_ptr(), this.exports.training_center_y_len())
-        const ranked = Array.from({ length: this.populationSize }, (_, index) => index)
-        ranked.sort((left, right) => centerX[right] - centerX[left])
-        const creatureCount = Math.min(maximum, this.populationSize)
+        const exports = this.wasm()
+        const x = this.readSlice(exports.training_x_ptr(), exports.training_x_len())
+        const y = this.readSlice(exports.training_y_ptr(), exports.training_y_len())
+        const centerX = this.readSlice(exports.training_center_x_ptr(), exports.training_center_x_len())
+        const centerY = this.readSlice(exports.training_center_y_ptr(), exports.training_center_y_len())
+        const ranked = selectTopIndices(this.populationSize, maximum, (index) => centerX[index])
+        const creatureCount = ranked.length
         const positions = new Float32Array(creatureCount * this.particleCount * 2)
         const centers = new Float32Array(creatureCount * 2)
         for (let output = 0; output < creatureCount; output++) {
@@ -485,5 +498,10 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
             }
         }
         return { creatureCount, particleCount: this.particleCount, positions, centers }
+    }
+
+    private wasm(): TrainingWasmExports {
+        if (!this.exports) throw new Error("WASM training engine has been disposed")
+        return this.exports
     }
 }

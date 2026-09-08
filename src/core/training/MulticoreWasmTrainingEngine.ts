@@ -10,7 +10,7 @@ import type {
     TrainingStageTimings,
     EvolutionPolicyState,
 } from "@/core/types"
-import type { EvaluatedGeneration, TrainingBackendEngine } from "./engineBackend"
+import { selectTopIndices, type EvaluatedGeneration, type TrainingBackendEngine } from "./engineBackend"
 import { RustWasmTrainingEngine, type WasmEvaluationBatch } from "./RustWasmTrainingEngine"
 import { captureReplayFrames } from "./replayCapture"
 import { CANDIDATE_METRIC_STRIDE, EvolutionPolicyV3 } from "./EvolutionPolicyV3"
@@ -186,7 +186,10 @@ export class MulticoreWasmTrainingEngine implements TrainingBackendEngine {
         if (!responses.every((response) => response.completed)) return false
 
         const transitionStarted = performance.now()
-        const finished = await Promise.all(this.shards.map((shard) => shard.client.request({ type: "finish" })))
+        const finished = await Promise.all(this.shards.map((shard) => shard.client.request({
+            type: "finish",
+            includeRender: !this.config.backgroundMode,
+        })))
         this.timings.fitnessMs = performance.now() - transitionStarted
         this.memoryBytes = finished.reduce((sum, response) => sum + (response.snapshot?.diagnostics.memoryBytes ?? 0), 0)
         await this.evolveGlobally(finished)
@@ -274,6 +277,9 @@ export class MulticoreWasmTrainingEngine implements TrainingBackendEngine {
         this.currentPopulation = []
         this.lastRender = undefined
         this.pendingEvaluation = null
+        this.bestGenome = null
+        this.generationDurations.length = 0
+        this.policy.dispose()
     }
 
     private async evolveGlobally(responses: ShardResponse[]): Promise<void> {
@@ -323,12 +329,24 @@ export class MulticoreWasmTrainingEngine implements TrainingBackendEngine {
         const renders = responses.map((response) => response.snapshot?.render).filter((render): render is PackedRenderSnapshot => Boolean(render))
         if (!renders.length) return undefined
         const particleCount = this.topology.particles.length
-        const creatureCount = Math.min(5, renders.length)
+        const candidates = renders.flatMap((render) => Array.from(
+            { length: render.creatureCount },
+            (_, creature) => ({ render, creature }),
+        ))
+        const ranked = selectTopIndices(candidates.length, 5, (index) => {
+            const candidate = candidates[index]
+            return candidate.render.centers[candidate.creature * 2]
+        })
+        const creatureCount = ranked.length
         const positions = new Float32Array(creatureCount * particleCount * 2)
         const centers = new Float32Array(creatureCount * 2)
-        for (let creature = 0; creature < creatureCount; creature++) {
-            positions.set(renders[creature].positions.subarray(0, particleCount * 2), creature * particleCount * 2)
-            centers.set(renders[creature].centers.subarray(0, 2), creature * 2)
+        for (let output = 0; output < creatureCount; output++) {
+            const { render, creature } = candidates[ranked[output]]
+            positions.set(
+                render.positions.subarray(creature * particleCount * 2, (creature + 1) * particleCount * 2),
+                output * particleCount * 2,
+            )
+            centers.set(render.centers.subarray(creature * 2, creature * 2 + 2), output * 2)
         }
         return { creatureCount, particleCount, positions, centers }
     }

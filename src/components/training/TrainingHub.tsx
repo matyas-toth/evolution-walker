@@ -202,8 +202,8 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
                         variant="ghost"
                         size="icon"
                         className="size-8"
-                        aria-label="Back to creature editor"
-                        onClick={() => router.push(`/dashboard/creatures/${creatureId}/edit`)}
+                        aria-label="Back to creatures"
+                        onClick={() => router.push("/dashboard/creatures")}
                     >
                         <ArrowLeft data-icon="inline-start" />
                     </Button>

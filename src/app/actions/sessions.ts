@@ -48,6 +48,7 @@ export async function saveTrainingSession(payload: SaveSessionPayload) {
 
     revalidatePath(`/dashboard/creatures/${payload.creatureId}/train`)
     revalidatePath(`/dashboard/creatures`)
+    revalidatePath(`/dashboard`)
 
     return { success: true, sessionId: saved.id }
 }
@@ -98,6 +99,7 @@ export async function deleteTrainingSession(sessionId: string) {
 
     revalidatePath(`/dashboard/creatures/${ts.creature.id}/train`)
     revalidatePath(`/dashboard/creatures`)
+    revalidatePath(`/dashboard`)
 
     return { success: true }
 }

@@ -60,6 +60,15 @@ test("training supports live pacing, pause, backend preservation, resume, and re
   await saveProgress.click()
   await expect(page.getByText("Progress saved successfully.")).toBeVisible({ timeout: 15_000 })
 
+  await page.goto("/dashboard")
+  const dashboardSession = page.getByRole("row").filter({ hasText: sessionName })
+  await expect(dashboardSession).toContainText("Stickman")
+  await expect(dashboardSession).toContainText(String(savedGeneration))
+  await expect(dashboardSession).toContainText("In progress")
+  await dashboardSession.getByRole("link", { name: "Resume" }).click()
+  await expect(page).toHaveURL(/\?session=/)
+  await expect(metric(page, "Generation")).toHaveText(String(savedGeneration))
+
   await page.goto("/dashboard/creatures")
   const card = page.getByText("Stickman", { exact: true }).locator("../..").locator("..")
   await card.hover()
@@ -71,7 +80,8 @@ test("training supports live pacing, pause, backend preservation, resume, and re
   await page.getByRole("button", { name: "Reset" }).click()
   await expect(metric(page, "Generation")).toHaveText("0")
 
-  await page.goto("/dashboard/creatures")
+  await page.getByRole("button", { name: "Back to creatures" }).click()
+  await expect(page).toHaveURL(/\/dashboard\/creatures$/)
   const savedCard = page.getByText("Stickman", { exact: true }).locator("../..").locator("..")
   await savedCard.hover()
   await savedCard.getByTitle("View Runs & Leaderboard").click()

@@ -6,7 +6,7 @@ import type { ActiveTrainingBackend, Genome, Topology, TrainingEngineConfig } fr
 type ShardCommand =
     | { id: number; type: "init"; topology: Topology; config: TrainingEngineConfig; population?: Genome[]; generation: number; backend: ActiveTrainingBackend; externalEvolution?: boolean }
     | { id: number; type: "run"; maxSteps: number; budgetMs: number; includeRender: boolean }
-    | { id: number; type: "finish" }
+    | { id: number; type: "finish"; includeRender: boolean }
     | { id: number; type: "update"; config: TrainingEngineConfig }
     | { id: number; type: "install"; population: Genome[] }
     | { id: number; type: "export" }
@@ -37,7 +37,7 @@ scope.onmessage = async (message: MessageEvent<ShardCommand>) => {
                 if (!engine) throw new Error("Shard is not initialized")
                 const evaluated = engine.finishGeneration()
                 const batch = engine.getLastEvaluationBatch()
-                const snapshot = engine.getSnapshot("running", true)
+                const snapshot = engine.getSnapshot("running", command.includeRender)
                 const transfer: Transferable[] = snapshot.render
                     ? [snapshot.render.positions.buffer, snapshot.render.centers.buffer]
                     : []

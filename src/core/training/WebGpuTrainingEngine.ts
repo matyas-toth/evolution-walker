@@ -9,7 +9,7 @@ import type {
     TrainingStageTimings,
     EvolutionPolicyState,
 } from "@/core/types"
-import type { EvaluatedGeneration, TrainingBackendEngine } from "./engineBackend"
+import { selectTopIndices, type EvaluatedGeneration, type TrainingBackendEngine } from "./engineBackend"
 import { getTrainingTargetZone, TRAINING_FRAME_RATE, TRAINING_GROUND_Y } from "./world"
 import { analyzeLocomotion, type LocomotionAnalysis } from "@/core/topology/locomotion"
 import { CandidateMetricOffset, CANDIDATE_METRIC_STRIDE, EvolutionPolicyV3 } from "./EvolutionPolicyV3"
@@ -34,6 +34,8 @@ interface GpuDeviceHandle {
         onSubmittedWorkDone(): Promise<void>
     }
     lost: Promise<{ message: string }>
+    destroy(): void
+    destroy(): void
     createBuffer(descriptor: { size: number; usage: number }): GpuBufferHandle
     createShaderModule(descriptor: { code: string }): unknown
     createComputePipelineAsync(descriptor: unknown): Promise<{ getBindGroupLayout(index: number): unknown }>
@@ -318,16 +320,16 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
     private readonly muscleIds: string[]
     private readonly random: SeededRandom
     private readonly locomotion: LocomotionAnalysis
-    private readonly genomes: Float32Array
-    private readonly state: Float32Array
-    private readonly metrics: Float32Array
+    private genomes: Float32Array
+    private state: Float32Array
+    private metrics: Float32Array
     private readonly stateBuffer: GpuBufferHandle
     private readonly genomeBuffer: GpuBufferHandle
     private readonly metricsBuffer: GpuBufferHandle
     private readonly paramsBuffer: GpuBufferHandle
     private readonly stateReadBuffer: GpuBufferHandle
     private readonly metricsReadBuffer: GpuBufferHandle
-    private readonly replayPositions: Float32Array
+    private replayPositions: Float32Array
     private readonly replayPositionsBuffer: GpuBufferHandle
     private readonly replayPositionsReadBuffer: GpuBufferHandle
     private readonly replayMode: boolean
@@ -343,6 +345,7 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
     private readonly policy: EvolutionPolicyV3
     private readonly buffers: GpuBufferHandle[] = []
     private disposed = false
+    private gpuBufferBytes = 0
 
     static async create(topology: Topology, config: TrainingEngineConfig, initialPopulation?: Genome[], initialGeneration = 1, replayMode = false, policyState?: EvolutionPolicyState): Promise<WebGpuTrainingEngine> {
         const gpu = (navigator as WorkerGpuNavigator).gpu
@@ -350,19 +353,24 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
         const adapter = await gpu.requestAdapter({ powerPreference: "high-performance" })
         if (!adapter) throw new Error("No high-performance WebGPU adapter is available")
         const device = await adapter.requestDevice()
-        const shaderModule = device.createShaderModule({ code: TRAINING_SHADER })
-        const compilation = await (shaderModule as {
-            getCompilationInfo(): Promise<{ messages: Array<{ type: string; lineNum: number; message: string }> }>
-        }).getCompilationInfo()
-        const shaderErrors = compilation.messages.filter((message) => message.type === "error")
-        if (shaderErrors.length) {
-            throw new Error(shaderErrors.slice(0, 3).map((message) => `WGSL ${message.lineNum}: ${message.message}`).join(" | "))
+        try {
+            const shaderModule = device.createShaderModule({ code: TRAINING_SHADER })
+            const compilation = await (shaderModule as {
+                getCompilationInfo(): Promise<{ messages: Array<{ type: string; lineNum: number; message: string }> }>
+            }).getCompilationInfo()
+            const shaderErrors = compilation.messages.filter((message) => message.type === "error")
+            if (shaderErrors.length) {
+                throw new Error(shaderErrors.slice(0, 3).map((message) => `WGSL ${message.lineNum}: ${message.message}`).join(" | "))
+            }
+            const pipeline = await device.createComputePipelineAsync({
+                layout: "auto",
+                compute: { module: shaderModule, entryPoint: "train" },
+            })
+            return new WebGpuTrainingEngine(device, pipeline, topology, config, initialPopulation, initialGeneration, replayMode, policyState)
+        } catch (error) {
+            device.destroy()
+            throw error
         }
-        const pipeline = await device.createComputePipelineAsync({
-            layout: "auto",
-            compute: { module: shaderModule, entryPoint: "train" },
-        })
-        return new WebGpuTrainingEngine(device, pipeline, topology, config, initialPopulation, initialGeneration, replayMode, policyState)
     }
 
     private constructor(device: GpuDeviceHandle, pipeline: { getBindGroupLayout(index: number): unknown }, topology: Topology, config: TrainingEngineConfig, initialPopulation: Genome[] | undefined, initialGeneration: number, replayMode: boolean, policyState?: EvolutionPolicyState) {
@@ -401,10 +409,9 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
             this.paramsBuffer = this.createBuffer(params, GPU_STORAGE | GPU_COPY_DST)
             const oscillatorBuffer = this.createBuffer(oscillators, GPU_STORAGE)
             this.replayPositionsBuffer = this.createBuffer(this.replayPositions, GPU_STORAGE | GPU_COPY_SRC)
-            this.stateReadBuffer = device.createBuffer({ size: this.state.byteLength, usage: GPU_MAP_READ | GPU_COPY_DST })
-            this.metricsReadBuffer = device.createBuffer({ size: this.metrics.byteLength, usage: GPU_MAP_READ | GPU_COPY_DST })
-            this.replayPositionsReadBuffer = device.createBuffer({ size: this.replayPositions.byteLength, usage: GPU_MAP_READ | GPU_COPY_DST })
-            this.buffers.push(this.stateReadBuffer, this.metricsReadBuffer, this.replayPositionsReadBuffer)
+            this.stateReadBuffer = this.createEmptyBuffer(this.state.byteLength, GPU_MAP_READ | GPU_COPY_DST)
+            this.metricsReadBuffer = this.createEmptyBuffer(this.metrics.byteLength, GPU_MAP_READ | GPU_COPY_DST)
+            this.replayPositionsReadBuffer = this.createEmptyBuffer(this.replayPositions.byteLength, GPU_MAP_READ | GPU_COPY_DST)
             this.bindGroup = device.createBindGroup({
                 layout: pipeline.getBindGroupLayout(0),
                 entries: [this.stateBuffer, particleBuffer, constraintBuffer, this.genomeBuffer, this.metricsBuffer, this.paramsBuffer, oscillatorBuffer, this.replayPositionsBuffer]
@@ -540,7 +547,8 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
                 backend: "webgpu", workerCount: 1,
                 generationsPerSecond: averageDuration ? 1000 / averageDuration : 0,
                 stageTimings: { ...this.timings }, droppedSnapshots: 0,
-                memoryBytes: this.state.byteLength + this.metrics.byteLength + this.genomes.byteLength,
+                memoryBytes: this.gpuBufferBytes + this.state.byteLength + this.metrics.byteLength
+                    + this.genomes.byteLength + this.replayPositions.byteLength,
                 policyVersion: 3,
                 bestDistance: this.lastEvaluation?.bestDistance ?? policyDiagnostics.bestDistance,
                 medianDistance: this.lastEvaluation?.medianDistance,
@@ -624,12 +632,30 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
         this.disposed = true
         for (const buffer of this.buffers) buffer.destroy()
         this.buffers.length = 0
+        this.device.destroy()
+        this.gpuBufferBytes = 0
+        this.policy.dispose()
+        this.genomes = new Float32Array()
+        this.state = new Float32Array()
+        this.metrics = new Float32Array()
+        this.replayPositions = new Float32Array()
+        this.bestGenomeValues = null
+        this.lastEvaluation = null
+        this.generationDurations.length = 0
     }
 
     private createBuffer(data: Float32Array, usage: number): GpuBufferHandle {
-        const buffer = this.device.createBuffer({ size: Math.max(4, data.byteLength), usage: usage | GPU_COPY_DST })
-        this.buffers.push(buffer)
+        const size = Math.max(4, data.byteLength)
+        const buffer = this.createEmptyBuffer(size, usage | GPU_COPY_DST)
         if (data.byteLength) this.device.queue.writeBuffer(buffer, 0, data)
+        return buffer
+    }
+
+    private createEmptyBuffer(size: number, usage: number): GpuBufferHandle {
+        const allocatedSize = Math.max(4, size)
+        const buffer = this.device.createBuffer({ size: allocatedSize, usage })
+        this.buffers.push(buffer)
+        this.gpuBufferBytes += allocatedSize
         return buffer
     }
 
@@ -703,8 +729,8 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
     }
 
     private createRenderSnapshot(maximum: number): TrainingSnapshot["render"] {
-        const ranked = Array.from({ length: this.config.populationSize }, (_, index) => index).sort((left, right) => this.metrics[right * 15] - this.metrics[left * 15])
-        const creatureCount = Math.min(maximum, this.config.populationSize)
+        const ranked = selectTopIndices(this.config.populationSize, maximum, (index) => this.metrics[index * 15])
+        const creatureCount = ranked.length
         const particleCount = this.topology.particles.length
         const positions = new Float32Array(creatureCount * particleCount * 2)
         const centers = new Float32Array(creatureCount * 2)

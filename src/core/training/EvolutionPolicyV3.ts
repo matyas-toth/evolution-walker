@@ -196,6 +196,11 @@ export class EvolutionPolicyV3 {
     this.config = config
   }
 
+  dispose(): void {
+    this.archive.clear()
+    this.champion = undefined
+  }
+
   exportState(): EvolutionPolicyState {
     return {
       version: 3,
