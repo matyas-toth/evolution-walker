@@ -1,78 +1,102 @@
-"use client"
+"use client";
 
-import { Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
-import type { FitnessDataPoint } from "@/hooks/useEvolution"
+import {
+  Line,
+  LineChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import type { FitnessDataPoint } from "@/hooks/useEvolution";
 
 interface FitnessChartProps {
-    data: FitnessDataPoint[]
-    targetDistance: number
+  data: FitnessDataPoint[];
+  targetDistance: number;
 }
 
 export function FitnessChart({ data, targetDistance }: FitnessChartProps) {
-    if (data.length === 0) {
-        return (
-            <div className="flex-1 w-full h-full flex items-center justify-center text-sm text-muted-foreground bg-muted/20 border-t border-border">
-                No generation data yet
-            </div>
-        )
-    }
-
+  if (data.length === 0) {
     return (
-        <div className="flex-1 w-full h-full min-h-[150px] p-4 bg-muted/10 border-t border-border flex flex-col">
-            <h3 className="text-xs font-semibold text-muted-foreground mb-2 px-2 uppercase tracking-wider">Evolution Distance</h3>
-            <div className="flex-1 min-h-0">
-                <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={data} margin={{ top: 5, right: 20, left: -20, bottom: 0 }}>
-                        <XAxis
-                            dataKey="generation"
-                            stroke="rgba(255, 255, 255, 0.3)"
-                            fontSize={10}
-                            tickLine={false}
-                            axisLine={false}
-                        />
-                        <YAxis
-                            stroke="rgba(255, 255, 255, 0.3)"
-                            fontSize={10}
-                            tickLine={false}
-                            axisLine={false}
-                            domain={[0, Math.max(targetDistance, 1)]}
-                        />
-                        <Tooltip
-                            contentStyle={{ backgroundColor: "#1a1a1a", borderColor: "#333", borderRadius: "8px", fontSize: "12px", color: "#fff" }}
-                            itemStyle={{ color: "#fff" }}
-                        />
-                        <Line
-                            type="monotone"
-                            dataKey="bestDistance"
-                            name="All-time best sustained distance"
-                            stroke="#2ecc71"
-                            strokeWidth={2}
-                            dot={false}
-                            isAnimationActive={false}
-                        />
-                        <Line
-                            type="monotone"
-                            dataKey="p90Distance"
-                            name="Generation p90 distance"
-                            stroke="rgba(255, 255, 255, 0.5)"
-                            strokeWidth={1.5}
-                            dot={false}
-                            isAnimationActive={false}
-                            strokeDasharray="4 4"
-                        />
-                        <Line
-                            type="monotone"
-                            dataKey="medianDistance"
-                            name="Generation median distance"
-                            stroke="rgba(255, 255, 255, 0.3)"
-                            strokeWidth={1}
-                            dot={false}
-                            isAnimationActive={false}
-                        />
-                        <ReferenceLine y={targetDistance} stroke="#f59e0b" strokeDasharray="3 3" label={{ value: "Target", fill: "#f59e0b", fontSize: 10 }} />
-                    </LineChart>
-                </ResponsiveContainer>
-            </div>
-        </div>
-    )
+      <div className="flex-1 w-full h-full flex items-center justify-center text-sm text-muted-foreground bg-muted/20 border-t border-border">
+        No generation data yet
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 w-full h-full min-h-[150px] p-4 bg-muted/10 border-t border-border flex flex-col">
+      <h3 className="text-xs font-semibold text-muted-foreground mb-2 px-2 uppercase tracking-wider">
+        Evolution Distance
+      </h3>
+      <div className="flex-1 min-h-0">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart
+            data={data}
+            margin={{ top: 5, right: 20, left: -20, bottom: 0 }}
+          >
+            <XAxis
+              dataKey="generation"
+              stroke="rgba(255, 255, 255, 0.3)"
+              fontSize={10}
+              tickLine={false}
+              axisLine={false}
+            />
+            <YAxis
+              stroke="rgba(255, 255, 255, 0.3)"
+              fontSize={10}
+              tickLine={false}
+              axisLine={false}
+              domain={[0, Math.max(targetDistance, 1)]}
+            />
+            <Tooltip
+              contentStyle={{
+                backgroundColor: "#1a1a1a",
+                borderColor: "#333",
+                borderRadius: "8px",
+                fontSize: "12px",
+                color: "#fff",
+              }}
+              itemStyle={{ color: "#fff" }}
+            />
+            <Line
+              type="monotone"
+              dataKey="bestDistance"
+              name="All-time best sustained distance"
+              stroke="#2ecc71"
+              strokeWidth={2}
+              dot={false}
+              isAnimationActive={false}
+            />
+            <Line
+              type="monotone"
+              dataKey="p90Distance"
+              name="Generation p90 distance"
+              stroke="rgba(255, 255, 255, 0.5)"
+              strokeWidth={1.5}
+              dot={false}
+              isAnimationActive={false}
+              strokeDasharray="4 4"
+            />
+            <Line
+              type="monotone"
+              dataKey="medianDistance"
+              name="Generation median distance"
+              stroke="rgba(255, 255, 255, 0.3)"
+              strokeWidth={1}
+              dot={false}
+              isAnimationActive={false}
+            />
+            <ReferenceLine
+              y={targetDistance}
+              stroke="#f59e0b"
+              strokeDasharray="3 3"
+              label={{ value: "Target", fill: "#f59e0b", fontSize: 10 }}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
 }

@@ -5,7 +5,12 @@
  */
 
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import {
+  Geist,
+  Geist_Mono,
+  Instrument_Sans,
+  Bricolage_Grotesque,
+} from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
@@ -19,9 +24,20 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const instrumentSans = Instrument_Sans({
+  variable: "--font-instrument-sans",
+  subsets: ["latin"],
+});
+
+const bricolageGrotesque = Bricolage_Grotesque({
+  variable: "--font-bricolage-grotesque",
+  subsets: ["latin"],
+});
+
 export const metadata: Metadata = {
   title: "Evolution Walker",
-  description: "Design soft-body 2D creatures and train them to walk using genetic algorithms",
+  description:
+    "Design soft-body 2D creatures and train them to walk using genetic algorithms",
 };
 
 export default function RootLayout({
@@ -32,7 +48,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} ${instrumentSans.variable} ${bricolageGrotesque.variable} antialiased font-sans`}
       >
         {children}
         <Toaster />

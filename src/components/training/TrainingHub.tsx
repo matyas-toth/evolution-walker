@@ -1,282 +1,349 @@
-"use client"
+"use client";
 
-import { useState, useCallback, useEffect, useMemo } from "react"
-import { useRouter } from "next/navigation"
-import { ArrowLeft } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { useEvolution, type UseEvolutionProps } from "@/hooks/useEvolution"
-import { useReplay } from "@/hooks/useReplay"
-import { TrainingSidebar } from "./TrainingSidebar"
-import { SimulationCanvas } from "./SimulationCanvas"
-import { FitnessChart } from "./FitnessChart"
-import { ReplayOverlay } from "./ReplayOverlay"
-import { saveTrainingSession } from "@/app/actions/sessions"
-import { getTrainingTargetZone, TRAINING_GROUND_Y } from "@/core/training/world"
-import type { Topology, TrainingHubConfig, ReplayPhase, Creature, Genome, PackedTrainingReplay } from "@/core/types"
+import { useState, useCallback, useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { ArrowLeft } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { useEvolution, type UseEvolutionProps } from "@/hooks/useEvolution";
+import { useReplay } from "@/hooks/useReplay";
+import { TrainingSidebar } from "./TrainingSidebar";
+import { SimulationCanvas } from "./SimulationCanvas";
+import { FitnessChart } from "./FitnessChart";
+import { ReplayOverlay } from "./ReplayOverlay";
+import { saveTrainingSession } from "@/app/actions/sessions";
+import {
+  getTrainingTargetZone,
+  TRAINING_GROUND_Y,
+} from "@/core/training/world";
+import type {
+  Topology,
+  TrainingHubConfig,
+  ReplayPhase,
+  Creature,
+  Genome,
+  PackedTrainingReplay,
+} from "@/core/types";
 
 interface SerializedSession {
-    id: string
-    config: TrainingHubConfig
-    population: Genome[]
-    bestGenome: Genome
-    generation: number
+  id: string;
+  config: TrainingHubConfig;
+  population: Genome[];
+  bestGenome: Genome;
+  generation: number;
 }
 
 interface TrainingHubProps {
-    creatureId: string
-    creatureName: string
-    topology: Topology
-    /** When provided, the hub restores state from this saved session. */
-    initialSession?: SerializedSession
+  creatureId: string;
+  creatureName: string;
+  topology: Topology;
+  /** When provided, the hub restores state from this saved session. */
+  initialSession?: SerializedSession;
 }
 
 /** Derives initial config state from an optional saved session or sensible defaults. */
 function resolveInitialConfig(session?: SerializedSession): TrainingHubConfig {
-    if (session?.config) return { ...session.config, evolutionPolicyVersion: 3 }
-    return {
-        populationSize: 500,
-        generationDuration: 10,
-        mutationRate: 0.15,
-        mutationStrength: 0.28,
-        elitismCount: 1,
-        parentsTopPercent: 0.2,
-        targetDistance: 1400,
-        backgroundMode: false,
-        simulationSpeed: 1,
-        backend: "auto",
-        seed: 0x6d2b79f5,
-        workerCount: "auto",
-        snapshotHz: 5,
-        evolutionPolicyVersion: 3,
-    }
+  if (session?.config) return { ...session.config, evolutionPolicyVersion: 3 };
+  return {
+    populationSize: 500,
+    generationDuration: 10,
+    mutationRate: 0.15,
+    mutationStrength: 0.28,
+    elitismCount: 1,
+    parentsTopPercent: 0.2,
+    targetDistance: 1400,
+    backgroundMode: false,
+    simulationSpeed: 1,
+    backend: "auto",
+    seed: 0x6d2b79f5,
+    workerCount: "auto",
+    snapshotHz: 5,
+    evolutionPolicyVersion: 3,
+  };
 }
 
-export function TrainingHub({ creatureId, creatureName, topology, initialSession }: TrainingHubProps) {
-    const router = useRouter()
-    const [config, setConfig] = useState<TrainingHubConfig>(resolveInitialConfig(initialSession))
-    const [replayPhase, setReplayPhase] = useState<ReplayPhase>({ type: "none" })
-    const [replayData, setReplayData] = useState<PackedTrainingReplay | null>(null)
-    const [isSaving, setIsSaving] = useState(false)
+export function TrainingHub({
+  creatureId,
+  creatureName,
+  topology,
+  initialSession,
+}: TrainingHubProps) {
+  const router = useRouter();
+  const [config, setConfig] = useState<TrainingHubConfig>(
+    resolveInitialConfig(initialSession),
+  );
+  const [replayPhase, setReplayPhase] = useState<ReplayPhase>({ type: "none" });
+  const [replayData, setReplayData] = useState<PackedTrainingReplay | null>(
+    null,
+  );
+  const [isSaving, setIsSaving] = useState(false);
 
-    useEffect(() => {
-        const query = new URLSearchParams(window.location.search)
-        const requested = query.get("backend")
-        const population = Number(query.get("population"))
-        const duration = Number(query.get("duration"))
-        const seed = Number(query.get("seed"))
-        setConfig((current) => ({
-            ...current,
-            backend: ["auto", "webgpu", "wasm-simd", "wasm-scalar", "legacy"].includes(requested ?? "")
-                ? requested as NonNullable<TrainingHubConfig["backend"]>
-                : current.backend,
-            populationSize: Number.isFinite(population) && population >= 10 && population <= 2000
-                ? Math.round(population)
-                : current.populationSize,
-            generationDuration: Number.isFinite(duration) && duration >= 3 && duration <= 30
-                ? Math.round(duration)
-                : current.generationDuration,
-            seed: query.has("seed") && Number.isFinite(seed) ? seed >>> 0 : current.seed,
-        }))
-    }, [])
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    const requested = query.get("backend");
+    const population = Number(query.get("population"));
+    const duration = Number(query.get("duration"));
+    const seed = Number(query.get("seed"));
+    setConfig((current) => ({
+      ...current,
+      backend: [
+        "auto",
+        "webgpu",
+        "wasm-simd",
+        "wasm-scalar",
+        "legacy",
+      ].includes(requested ?? "")
+        ? (requested as NonNullable<TrainingHubConfig["backend"]>)
+        : current.backend,
+      populationSize:
+        Number.isFinite(population) && population >= 10 && population <= 2000
+          ? Math.round(population)
+          : current.populationSize,
+      generationDuration:
+        Number.isFinite(duration) && duration >= 3 && duration <= 30
+          ? Math.round(duration)
+          : current.generationDuration,
+      seed:
+        query.has("seed") && Number.isFinite(seed) ? seed >>> 0 : current.seed,
+    }));
+  }, []);
 
-    const handleTargetReached = useCallback((winner: Creature) => {
-        setReplayData(null)
-        setReplayPhase({ type: "preparing", genome: winner.genome, generation: winner.genome.generation })
-    }, [])
+  const handleTargetReached = useCallback((winner: Creature) => {
+    setReplayData(null);
+    setReplayPhase({
+      type: "preparing",
+      genome: winner.genome,
+      generation: winner.genome.generation,
+    });
+  }, []);
 
-    const restoredPopulation = useMemo(() => initialSession
-        ? [initialSession.bestGenome, ...initialSession.population.filter((genome) => genome.id !== initialSession.bestGenome.id)]
-            .slice(0, initialSession.config.populationSize)
-        : undefined, [initialSession])
-    const evolutionProps: UseEvolutionProps = {
-        ...config,
-        topology,
-        initialPopulation: restoredPopulation,
-        initialGeneration: initialSession?.generation,
-        onTargetReached: handleTargetReached,
-    }
+  const restoredPopulation = useMemo(
+    () =>
+      initialSession
+        ? [
+            initialSession.bestGenome,
+            ...initialSession.population.filter(
+              (genome) => genome.id !== initialSession.bestGenome.id,
+            ),
+          ].slice(0, initialSession.config.populationSize)
+        : undefined,
+    [initialSession],
+  );
+  const evolutionProps: UseEvolutionProps = {
+    ...config,
+    topology,
+    initialPopulation: restoredPopulation,
+    initialGeneration: initialSession?.generation,
+    onTargetReached: handleTargetReached,
+  };
 
-    const {
-        phase,
-        generation,
-        creatures,
-        progress,
-        fitnessHistory,
-        bestCreatureEver,
-        diagnostics,
-        error,
-        pausePending,
-        exportSession,
-        requestReplay,
-        start,
-        stop,
-        reset,
-    } = useEvolution(evolutionProps)
+  const {
+    phase,
+    generation,
+    creatures,
+    progress,
+    fitnessHistory,
+    bestCreatureEver,
+    diagnostics,
+    error,
+    pausePending,
+    exportSession,
+    requestReplay,
+    start,
+    stop,
+    reset,
+  } = useEvolution(evolutionProps);
 
-    useEffect(() => {
-        if (replayPhase.type !== "preparing") return
-        let cancelled = false
-        const { genome, generation } = replayPhase
-        requestReplay(genome).then((replay) => {
-            if (cancelled) return
-            setReplayData(replay)
-            setReplayPhase({ type: "active", genome, generation })
-        }).catch((replayError) => {
-            if (cancelled) return
-            setReplayPhase({
-                type: "error",
-                genome,
-                generation,
-                message: replayError instanceof Error ? replayError.message : "Exact replay capture failed",
-            })
-        })
-        return () => { cancelled = true }
-    }, [replayPhase, requestReplay])
+  useEffect(() => {
+    if (replayPhase.type !== "preparing") return;
+    let cancelled = false;
+    const { genome, generation } = replayPhase;
+    requestReplay(genome)
+      .then((replay) => {
+        if (cancelled) return;
+        setReplayData(replay);
+        setReplayPhase({ type: "active", genome, generation });
+      })
+      .catch((replayError) => {
+        if (cancelled) return;
+        setReplayPhase({
+          type: "error",
+          genome,
+          generation,
+          message:
+            replayError instanceof Error
+              ? replayError.message
+              : "Exact replay capture failed",
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [replayPhase, requestReplay]);
 
-    const { frameIndex: replayFrameIndex, replayProgress } = useReplay(replayData)
+  const { frameIndex: replayFrameIndex, replayProgress } =
+    useReplay(replayData);
 
-    const isRunning = phase === "running" || phase === "evaluating" || phase === "evolving"
-    const isPaused = phase === "paused"
-    const isReplayActive = replayPhase.type !== "none"
+  const isRunning =
+    phase === "running" || phase === "evaluating" || phase === "evolving";
+  const isPaused = phase === "paused";
+  const isReplayActive = replayPhase.type !== "none";
 
-    const handleToggleStart = () => {
-        if (isRunning) stop()
-        else start()
-    }
+  const handleToggleStart = () => {
+    if (isRunning) stop();
+    else start();
+  };
 
-    const handleSaveAndExit = useCallback(async (runName: string) => {
-        if (replayPhase.type === "none") return
-        setIsSaving(true)
-        try {
-            const engineState = await exportSession()
-            await saveTrainingSession({
-                creatureId,
-                name: runName || `Gen ${generation} - Target Reached`,
-                config: { ...config, policyState: engineState.policyState },
-                population: engineState.population,
-                bestGenome: replayPhase.genome,
-                bestFitness: engineState.bestFitness,
-                generation,
-                reachedTarget: true,
-            })
-            setReplayData(null)
-            router.push(`/dashboard/creatures`)
-        } catch (err) {
-            console.error("Failed to save session:", err)
-        } finally {
-            setIsSaving(false)
-        }
-    }, [replayPhase, creatureId, config, generation, exportSession, router])
-
-    const handleContinue = useCallback((newTargetDistance: number) => {
-        setReplayData(null)
-        setReplayPhase({ type: "none" })
-        setConfig((prev) => ({ ...prev, targetDistance: newTargetDistance }))
-        // Reset the targetReachedFired flag by resetting + starting fresh
-        reset()
-        // Small delay so config state propagates before start
-        setTimeout(() => start(), 50)
-    }, [reset, start])
-
-    const handleSaveProgress = useCallback(async (runName: string) => {
-        if (!bestCreatureEver) return
-        const engineState = await exportSession()
-        if (!engineState.bestGenome) throw new Error("No evaluated champion is available yet")
+  const handleSaveAndExit = useCallback(
+    async (runName: string) => {
+      if (replayPhase.type === "none") return;
+      setIsSaving(true);
+      try {
+        const engineState = await exportSession();
         await saveTrainingSession({
-            creatureId,
-            name: runName || `Gen ${generation}`,
-            config: { ...config, policyState: engineState.policyState },
-            population: engineState.population,
-            bestGenome: engineState.bestGenome,
-            bestFitness: engineState.bestFitness,
-            generation,
-            reachedTarget: false,
-        })
-    }, [creatureId, config, generation, bestCreatureEver, exportSession])
+          creatureId,
+          name: runName || `Gen ${generation} - Target Reached`,
+          config: { ...config, policyState: engineState.policyState },
+          population: engineState.population,
+          bestGenome: replayPhase.genome,
+          bestFitness: engineState.bestFitness,
+          generation,
+          reachedTarget: true,
+        });
+        setReplayData(null);
+        router.push(`/dashboard/creatures`);
+      } catch (err) {
+        console.error("Failed to save session:", err);
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [replayPhase, creatureId, config, generation, exportSession, router],
+  );
 
-    return (
-        <div className="flex flex-col h-screen overflow-hidden bg-background">
-            <div className="flex items-center justify-between h-14 px-4 border-b border-border bg-card shrink-0 shadow-sm z-10">
-                <div className="flex items-center gap-3">
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-8"
-                        aria-label="Back to creatures"
-                        onClick={() => router.push("/dashboard/creatures")}
-                    >
-                        <ArrowLeft data-icon="inline-start" />
-                    </Button>
-                    <div className="flex flex-col">
-                        <h1 className="text-sm font-semibold">{creatureName}</h1>
-                        <span className="text-xs text-muted-foreground">
-                            Training Simulation
-                            {initialSession && " - Resumed Session"}
-                        </span>
-                    </div>
-                </div>
-            </div>
+  const handleContinue = useCallback(
+    (newTargetDistance: number) => {
+      setReplayData(null);
+      setReplayPhase({ type: "none" });
+      setConfig((prev) => ({ ...prev, targetDistance: newTargetDistance }));
+      // Reset the targetReachedFired flag by resetting + starting fresh
+      reset();
+      // Small delay so config state propagates before start
+      setTimeout(() => start(), 50);
+    },
+    [reset, start],
+  );
 
-            <div className="flex flex-1 overflow-hidden relative">
-                <div className="flex-1 flex flex-col min-w-0">
-                    <div className="flex-1 relative">
-                        {isRunning || isPaused ? (
-                            <SimulationCanvas
-                                creatures={creatures}
-                                groundY={TRAINING_GROUND_Y}
-                                targetZone={getTrainingTargetZone(config.targetDistance)}
-                                showCount={5}
-                                dimmed={isReplayActive}
-                            />
-                        ) : (
-                            <div className="absolute inset-0 flex items-center justify-center text-muted-foreground bg-muted/10">
-                                <div className="text-center space-y-2">
-                                    <p className="font-medium text-foreground">Simulation Paused</p>
-                                    <p className="text-sm">Configure parameters on the right and click Start Evolution.</p>
-                                </div>
-                            </div>
-                        )}
+  const handleSaveProgress = useCallback(
+    async (runName: string) => {
+      if (!bestCreatureEver) return;
+      const engineState = await exportSession();
+      if (!engineState.bestGenome)
+        throw new Error("No evaluated champion is available yet");
+      await saveTrainingSession({
+        creatureId,
+        name: runName || `Gen ${generation}`,
+        config: { ...config, policyState: engineState.policyState },
+        population: engineState.population,
+        bestGenome: engineState.bestGenome,
+        bestFitness: engineState.bestFitness,
+        generation,
+        reachedTarget: false,
+      });
+    },
+    [creatureId, config, generation, bestCreatureEver, exportSession],
+  );
 
-                        {replayPhase.type !== "none" && (
-                            <ReplayOverlay
-                                generation={replayPhase.generation}
-                                topology={topology}
-                                replay={replayData}
-                                replayFrameIndex={replayFrameIndex}
-                                replayProgress={replayProgress}
-                                replayStatus={replayPhase.type}
-                                replayError={replayPhase.type === "error" ? replayPhase.message : undefined}
-                                currentTargetDistance={config.targetDistance}
-                                isSaving={isSaving}
-                                onSaveAndExit={handleSaveAndExit}
-                                onContinue={handleContinue}
-                            />
-                        )}
-                    </div>
-
-                    <div className="h-48 shrink-0 bg-card z-10 w-full flex flex-col">
-                        <FitnessChart data={fitnessHistory} targetDistance={Math.max(0, config.targetDistance - 100)} />
-                    </div>
-
-                </div>
-
-                <TrainingSidebar
-                    config={config}
-                    onChangeConfig={setConfig}
-                    isRunning={isRunning}
-                    isPaused={isPaused}
-                    generation={generation}
-                    progress={progress}
-                    bestFitness={bestCreatureEver?.fitness?.total ?? 0}
-                    onToggleStart={handleToggleStart}
-                    onReset={reset}
-                    onSaveProgress={handleSaveProgress}
-                    hasBestGenome={!!bestCreatureEver}
-                    diagnostics={diagnostics}
-                    engineError={error}
-                    pausePending={pausePending}
-                />
-            </div>
+  return (
+    <div className="flex flex-col h-full overflow-hidden bg-background ml-4 rounded-xl border border-border">
+      <div className="flex items-center justify-between h-14 px-4 border-b border-border rounded-l-xl bg-card shrink-0 shadow-sm z-10">
+        <div className="flex items-center gap-3">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8"
+            aria-label="Back to creatures"
+            onClick={() => router.push("/dashboard/creatures")}
+          >
+            <ArrowLeft data-icon="inline-start" />
+          </Button>
+          <div className="flex flex-col">
+            <h1 className="text-sm font-semibold">{creatureName}</h1>
+            <span className="text-xs text-muted-foreground">
+              Training Simulation
+              {initialSession && " - Resumed Session"}
+            </span>
+          </div>
         </div>
-    )
+      </div>
+
+      <div className="flex flex-1 overflow-hidden relative">
+        <div className="flex-1 flex flex-col min-w-0">
+          <div className="flex-1 relative">
+            {isRunning || isPaused ? (
+              <SimulationCanvas
+                creatures={creatures}
+                groundY={TRAINING_GROUND_Y}
+                targetZone={getTrainingTargetZone(config.targetDistance)}
+                showCount={5}
+                dimmed={isReplayActive}
+              />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center text-muted-foreground bg-muted/10">
+                <div className="text-center space-y-2">
+                  <p className="font-medium text-foreground">
+                    Simulation Paused
+                  </p>
+                  <p className="text-sm">
+                    Configure parameters on the right and click Start Evolution.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {replayPhase.type !== "none" && (
+              <ReplayOverlay
+                generation={replayPhase.generation}
+                topology={topology}
+                replay={replayData}
+                replayFrameIndex={replayFrameIndex}
+                replayProgress={replayProgress}
+                replayStatus={replayPhase.type}
+                replayError={
+                  replayPhase.type === "error" ? replayPhase.message : undefined
+                }
+                currentTargetDistance={config.targetDistance}
+                isSaving={isSaving}
+                onSaveAndExit={handleSaveAndExit}
+                onContinue={handleContinue}
+              />
+            )}
+          </div>
+
+          <div className="h-48 shrink-0 bg-card z-10 w-full flex flex-col">
+            <FitnessChart
+              data={fitnessHistory}
+              targetDistance={Math.max(0, config.targetDistance - 100)}
+            />
+          </div>
+        </div>
+
+        <TrainingSidebar
+          config={config}
+          onChangeConfig={setConfig}
+          isRunning={isRunning}
+          isPaused={isPaused}
+          generation={generation}
+          progress={progress}
+          bestFitness={bestCreatureEver?.fitness?.total ?? 0}
+          onToggleStart={handleToggleStart}
+          onReset={reset}
+          onSaveProgress={handleSaveProgress}
+          hasBestGenome={!!bestCreatureEver}
+          diagnostics={diagnostics}
+          engineError={error}
+          pausePending={pausePending}
+        />
+      </div>
+    </div>
+  );
 }
