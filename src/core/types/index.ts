@@ -1,5 +1,5 @@
 /**
- * Unified type exports for the EvoWalker core module.
+ * Unified type exports for the Evolution Walker core module.
  * @module core/types
  */
 

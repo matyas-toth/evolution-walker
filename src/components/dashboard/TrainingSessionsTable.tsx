@@ -49,9 +49,7 @@ export function TrainingSessionsTable({ sessions }: TrainingSessionsTableProps) 
                         Every saved checkpoint, ready to continue.
                     </p>
                 </div>
-                <span className="text-xs tabular-nums text-muted-foreground">
-                    {sessions.length} saved
-                </span>
+               
             </div>
 
             <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">

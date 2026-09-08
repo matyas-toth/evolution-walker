@@ -1,6 +1,6 @@
-# EvoWalker
+# Evolution Walker
 
-EvoWalker is an interactive evolutionary-robotics playground. You draw a particle-and-muscle creature, train a population in the browser, compare compute backends, and save or replay successful genomes. The training policy favors forward progress while rewarding sustained posture and support changes, so recognizable—sometimes delightfully awkward—gaits can emerge without a hard-coded locomotion controller.
+Evolution Walker is an interactive evolutionary-robotics playground. You draw a particle-and-muscle creature, train a population in the browser, compare compute backends, and save or replay successful genomes. The training policy favors forward progress while rewarding sustained posture and support changes, so recognizable—sometimes delightfully awkward—gaits can emerge without a hard-coded locomotion controller.
 
 ## Highlights
 

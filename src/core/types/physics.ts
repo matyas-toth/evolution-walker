@@ -1,5 +1,5 @@
 /**
- * Physics-related type definitions for the EvoWalker simulation engine.
+ * Physics-related type definitions for the Evolution Walker simulation engine.
  * @module core/types/physics
  */
 

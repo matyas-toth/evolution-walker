@@ -83,23 +83,7 @@ export default async function DashboardPage() {
                     </div>
                 </Link>
 
-                <Link
-                    href="#training-sessions"
-                    className="group flex flex-col gap-4 rounded-xl border border-border bg-card p-6 transition-colors hover:border-primary/30 hover:bg-card/80"
-                >
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-primary/10">
-                            <Activity className="h-5 w-5 text-primary" />
-                        </div>
-                        <ArrowRight className="h-4 w-4 rotate-90 text-muted-foreground transition-transform group-hover:translate-y-1" />
-                    </div>
-                    <div>
-                        <h2 className="font-semibold text-lg">Training Sessions</h2>
-                        <p className="text-sm text-muted-foreground mt-0.5">
-                            {serializedSessions.length} saved checkpoint{serializedSessions.length !== 1 ? "s" : ""}
-                        </p>
-                    </div>
-                </Link>
+                
             </div>
 
             <TrainingSessionsTable sessions={serializedSessions} />

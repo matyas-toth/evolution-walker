@@ -1,5 +1,5 @@
 /**
- * Pre-defined stickman topology for the EvoWalker simulation.
+ * Pre-defined stickman topology for the Evolution Walker simulation.
  * @module core/topology/stickman
  */
 
