@@ -56,7 +56,7 @@ export function TrainingSessionsTable({ sessions }: TrainingSessionsTableProps) 
                 {sessions.length === 0 ? (
                     <Empty className="min-h-52">
                         <EmptyHeader>
-                            <EmptyMedia variant="icon"><Timer /></EmptyMedia>
+                            <EmptyMedia className="bg-primary/10" variant="icon"><Timer className="text-primary" /></EmptyMedia>
                             <EmptyTitle>No saved training sessions yet</EmptyTitle>
                             <EmptyDescription>
                                 Train a creature and save its progress to create a resumable checkpoint.
