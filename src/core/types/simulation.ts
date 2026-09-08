@@ -155,7 +155,7 @@ export interface SimulationUpdate {
 }
 
 /**
- * All Training Hub sidebar settings — serialized into TrainingSession.config.
+ * All Training Hub sidebar settings - serialized into TrainingSession.config.
  * @module core/types/simulation
  */
 export interface TrainingHubConfig {

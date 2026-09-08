@@ -92,7 +92,7 @@ export function TrainingSessionsTable({ sessions }: TrainingSessionsTableProps) 
                                         </TableCell>
                                         <TableCell className="text-muted-foreground">{session.creatureName}</TableCell>
                                         <TableCell className="text-right font-mono tabular-nums">
-                                            {session.bestDistance === null ? "—" : numberFormat.format(session.bestDistance)}
+                                            {session.bestDistance === null ? "-" : numberFormat.format(session.bestDistance)}
                                         </TableCell>
                                         <TableCell className="text-right font-mono tabular-nums text-muted-foreground">
                                             {numberFormat.format(session.bestFitness)}

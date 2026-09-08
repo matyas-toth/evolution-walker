@@ -151,7 +151,7 @@ export function TrainingHub({ creatureId, creatureName, topology, initialSession
             const engineState = await exportSession()
             await saveTrainingSession({
                 creatureId,
-                name: runName || `Gen ${generation} — Target Reached`,
+                name: runName || `Gen ${generation} - Target Reached`,
                 config: { ...config, policyState: engineState.policyState },
                 population: engineState.population,
                 bestGenome: replayPhase.genome,

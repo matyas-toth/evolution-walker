@@ -12,13 +12,13 @@
 
 ## Commands
 
-- `npm run test:unit` — deterministic TypeScript algorithms, worker client, packed engine, and WASM ABI.
-- `npm run test:component` — React hooks and training UI behavior in jsdom.
-- `npm run test:engine` — host-native Rust engine tests.
-- `npm run test:integration` — real migrations and Prisma queries in an ephemeral MariaDB 11.4 container.
-- `npm run test:e2e` — isolated MariaDB plus Chromium browser journeys.
-- `npm run test:coverage` — V8 HTML/LCOV reports with enforced risk-based thresholds.
-- `npm run test:benchmark` — production-build backend matrix with timestamped JSON/CSV output.
+- `npm run test:unit` - deterministic TypeScript algorithms, worker client, packed engine, and WASM ABI.
+- `npm run test:component` - React hooks and training UI behavior in jsdom.
+- `npm run test:engine` - host-native Rust engine tests.
+- `npm run test:integration` - real migrations and Prisma queries in an ephemeral MariaDB 11.4 container.
+- `npm run test:e2e` - isolated MariaDB plus Chromium browser journeys.
+- `npm run test:coverage` - V8 HTML/LCOV reports with enforced risk-based thresholds.
+- `npm run test:benchmark` - production-build backend matrix with timestamped JSON/CSV output.
 
 The MariaDB harness creates a random mapped port and dedicated `evolution_test` database. Integration setup refuses any URL that does not contain that database name. Containers are stopped in `finally` and on termination signals; Docker Desktop must be running locally.
 
