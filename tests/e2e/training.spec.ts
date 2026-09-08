@@ -82,17 +82,28 @@ test("training supports live pacing, pause, backend preservation, resume, and re
   expect(failures).toEqual([])
 })
 
-test("background mode remains responsive and intentionally disables pacing", async ({ page }, testInfo) => {
+test("WASM SIMD resumes after pausing and disabling background mode", async ({ page }, testInfo) => {
   test.slow()
+  const failures = capturePageFailures(page)
   await register(page, uniqueIdentity(testInfo, "background"))
   await openStickmanTraining(page)
-  await page.getByRole("switch").click()
+  await page.getByLabel("Compute Backend").selectOption("wasm-simd")
+  await expect(metric(page, "Engine")).toHaveText("wasm-simd", { timeout: 20_000 })
+  await page.getByRole("switch", { name: "Background Mode" }).click()
   await expect(page.getByText(/Runs unpaced at maximum compute throughput/)).toBeVisible()
   await expect(page.getByRole("slider").nth(1)).toBeDisabled()
   await page.getByRole("button", { name: "Start Evolution" }).click()
   await expect.poll(async () => Number(await metric(page, "Generation").textContent()), { timeout: 20_000 }).toBeGreaterThan(1)
   await page.getByRole("button", { name: "Pause Evolution" }).click()
   await expect(page.getByRole("button", { name: "Resume" })).toBeVisible()
+  const pausedGeneration = Number(await metric(page, "Generation").textContent())
+  await page.getByRole("switch", { name: "Background Mode" }).click()
+  await page.getByRole("button", { name: "Resume" }).click()
+  await expect.poll(async () => Number(await metric(page, "Generation").textContent()), { timeout: 20_000 }).toBeGreaterThan(pausedGeneration)
+  await page.getByRole("button", { name: "Pause Evolution" }).click()
+  await expect(page.getByRole("button", { name: "Resume" })).toBeVisible()
+  await assertNoFrameworkOverlay(page)
+  expect(failures).toEqual([])
 })
 
 test("target contact atomically pauses and opens the exact fixed-camera victory replay", async ({ page }, testInfo) => {

@@ -75,7 +75,7 @@ describe("TrainingSidebar", () => {
     })
     expect(screen.getAllByRole("slider")[1]).toHaveAttribute("data-disabled")
     expect(screen.getByText("GPU unavailable")).toBeVisible()
-    expect(screen.getByRole("button", { name: /Resume/i })).toBeVisible()
+    expect(screen.getByRole("button", { name: /Pausing/i })).toBeDisabled()
   })
 
   it("saves a named run and forwards slider changes", async () => {

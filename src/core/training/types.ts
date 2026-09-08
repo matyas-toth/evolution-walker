@@ -127,11 +127,18 @@ export type TrainingEvent =
     | { type: "sessionExported"; requestId: number; state: TrainingEngineState }
     | { type: "backendChanged"; backend: ActiveTrainingBackend; workerCount: number }
     | { type: "paused"; snapshot: TrainingSnapshot }
+    | { type: "disposed" }
     | { type: "error"; message: string; recoverable: boolean }
 
 export function resolveTrainingEngineConfig(config: TrainingHubConfig): TrainingEngineConfig {
+    const populationSize = Math.max(10, Math.min(2000, Math.round(
+        Number.isFinite(config.populationSize) ? config.populationSize : 500,
+    )))
+    const workerCount = config.workerCount === "auto" || !Number.isFinite(config.workerCount)
+        ? "auto"
+        : Math.max(1, Math.min(12, Math.floor(config.workerCount as number)))
     return {
-        populationSize: config.populationSize,
+        populationSize,
         generationDuration: config.generationDuration,
         mutationRate: config.mutationRate,
         mutationStrength: config.mutationStrength,
@@ -142,7 +149,7 @@ export function resolveTrainingEngineConfig(config: TrainingHubConfig): Training
         simulationSpeed: Math.max(0.1, Math.min(100, config.simulationSpeed)),
         backend: config.backend ?? "auto",
         seed: config.seed ?? 0x6d2b79f5,
-        workerCount: config.workerCount ?? "auto",
+        workerCount,
         snapshotHz: Math.max(1, Math.min(30, config.snapshotHz ?? 5)),
         evolutionPolicyVersion: 3,
         policyState: config.policyState,

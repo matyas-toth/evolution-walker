@@ -14,6 +14,7 @@ import type { EvaluatedGeneration, TrainingBackendEngine } from "./engineBackend
 import { RustWasmTrainingEngine, type WasmEvaluationBatch } from "./RustWasmTrainingEngine"
 import { captureReplayFrames } from "./replayCapture"
 import { CANDIDATE_METRIC_STRIDE, EvolutionPolicyV3 } from "./EvolutionPolicyV3"
+import { createSeededInitialPopulation } from "@/core/genetics/population"
 
 interface ShardResponse {
     id: number
@@ -27,10 +28,17 @@ interface ShardResponse {
     batch?: WasmEvaluationBatch
 }
 
+const SHARD_REQUEST_TIMEOUT_MS = 30_000
+
 class ShardClient {
     private readonly worker: Worker
-    private readonly pending = new Map<number, { resolve(value: ShardResponse): void; reject(error: Error): void }>()
+    private readonly pending = new Map<number, {
+        resolve(value: ShardResponse): void
+        reject(error: Error): void
+        timeout: ReturnType<typeof setTimeout>
+    }>()
     private requestId = 0
+    private failure: Error | null = null
 
     constructor() {
         this.worker = new Worker(new URL("./training.shard.worker.ts", import.meta.url), { type: "module", name: "evolution-training-shard" })
@@ -39,22 +47,44 @@ class ShardClient {
             const request = this.pending.get(response.id)
             if (!request) return
             this.pending.delete(response.id)
+            clearTimeout(request.timeout)
             if (response.error) request.reject(new Error(response.error))
             else request.resolve(response)
         }
         this.worker.onerror = (event) => {
-            const error = new Error(event.message || "Training shard failed")
-            for (const request of this.pending.values()) request.reject(error)
-            this.pending.clear()
+            this.fail(new Error(event.message || "Training shard failed"))
         }
     }
 
     request(command: Record<string, unknown>): Promise<ShardResponse> {
+        if (this.failure) return Promise.reject(this.failure)
         const id = ++this.requestId
         return new Promise((resolve, reject) => {
-            this.pending.set(id, { resolve, reject })
-            this.worker.postMessage({ ...command, id })
+            const timeout = setTimeout(() => {
+                this.fail(new Error(`Training shard request timed out after ${SHARD_REQUEST_TIMEOUT_MS}ms`))
+            }, SHARD_REQUEST_TIMEOUT_MS)
+            this.pending.set(id, { resolve, reject, timeout })
+            try {
+                this.worker.postMessage({ ...command, id })
+            } catch (error) {
+                this.fail(error instanceof Error ? error : new Error("Training shard request failed"))
+            }
         })
+    }
+
+    dispose(): void {
+        this.fail(new Error("Training shard disposed"))
+    }
+
+    private fail(error: Error): void {
+        if (this.failure) return
+        this.failure = error
+        for (const request of this.pending.values()) {
+            clearTimeout(request.timeout)
+            request.reject(error)
+        }
+        this.pending.clear()
+        this.worker.terminate()
     }
 }
 
@@ -80,34 +110,44 @@ export class MulticoreWasmTrainingEngine implements TrainingBackendEngine {
     private generationStartedAt = performance.now()
     private memoryBytes = 0
     private readonly policy: EvolutionPolicyV3
+    private currentPopulation: Genome[]
+    private disposed = false
 
     static async create(topology: Topology, config: TrainingEngineConfig, population: Genome[] | undefined, generation: number, backend: ActiveTrainingBackend, policyState?: EvolutionPolicyState): Promise<MulticoreWasmTrainingEngine> {
         const startedAt = performance.now()
+        const retainedPopulation = population
+            ?? createSeededInitialPopulation(topology, config.populationSize, config.seed, generation)
         const hardwareWorkers = Math.max(1, (navigator.hardwareConcurrency || 2) - 1)
         const requested = config.workerCount === "auto" ? hardwareWorkers : Math.max(1, Math.floor(config.workerCount))
         const workerCount = Math.max(1, Math.min(requested, Math.ceil(config.populationSize / 64), 12))
         const descriptors: ShardDescriptor[] = []
         let populationCursor = 0
-        for (let shard = 0; shard < workerCount; shard++) {
-            const remainingWorkers = workerCount - shard
-            const size = Math.ceil((config.populationSize - populationCursor) / remainingWorkers)
-            const client = new ShardClient()
-            const shardConfig: TrainingEngineConfig = { ...config, populationSize: size, workerCount: 1, seed: (config.seed + shard * 0x9e3779b9) >>> 0 }
-            await client.request({ type: "init", topology, config: shardConfig, population: population?.slice(populationCursor, populationCursor + size), generation, backend, externalEvolution: true })
-            descriptors.push({ client, populationSize: size })
-            populationCursor += size
+        try {
+            for (let shard = 0; shard < workerCount; shard++) {
+                const remainingWorkers = workerCount - shard
+                const size = Math.ceil((config.populationSize - populationCursor) / remainingWorkers)
+                const client = new ShardClient()
+                descriptors.push({ client, populationSize: size })
+                const shardConfig: TrainingEngineConfig = { ...config, populationSize: size, workerCount: 1, seed: (config.seed + shard * 0x9e3779b9) >>> 0 }
+                await client.request({ type: "init", topology, config: shardConfig, population: retainedPopulation.slice(populationCursor, populationCursor + size), generation, backend, externalEvolution: true })
+                populationCursor += size
+            }
+        } catch (error) {
+            for (const descriptor of descriptors) descriptor.client.dispose()
+            throw error
         }
-        const engine = new MulticoreWasmTrainingEngine(descriptors, topology, config, generation, backend, policyState)
+        const engine = new MulticoreWasmTrainingEngine(descriptors, topology, config, retainedPopulation, generation, backend, policyState)
         engine.timings.initializeMs = performance.now() - startedAt
         return engine
     }
 
-    private constructor(shards: ShardDescriptor[], topology: Topology, config: TrainingEngineConfig, generation: number, backend: ActiveTrainingBackend, policyState?: EvolutionPolicyState) {
+    private constructor(shards: ShardDescriptor[], topology: Topology, config: TrainingEngineConfig, population: Genome[], generation: number, backend: ActiveTrainingBackend, policyState?: EvolutionPolicyState) {
         this.shards = shards
         this.topology = topology
         this.config = config
         this.generation = generation
         this.backend = backend
+        this.currentPopulation = population
         this.policy = new EvolutionPolicyV3(topology, config, policyState)
         this.bestGenome = this.policy.getChampionGenome(generation)
         this.bestFitness = this.policy.getChampionFitness()
@@ -119,7 +159,9 @@ export class MulticoreWasmTrainingEngine implements TrainingBackendEngine {
         this.policy.updateConfig(config)
         for (const shard of this.shards) {
             const shardConfig = { ...config, populationSize: shard.populationSize, workerCount: 1 }
-            void shard.client.request({ type: "update", config: shardConfig })
+            void shard.client.request({ type: "update", config: shardConfig }).catch(() => {
+                // The next awaited shard operation reports the failure centrally.
+            })
         }
     }
 
@@ -192,10 +234,9 @@ export class MulticoreWasmTrainingEngine implements TrainingBackendEngine {
 
     getBestGenome(): Genome | null { return this.bestGenome }
 
-    async exportState(): Promise<TrainingEngineState> {
-        const responses = await Promise.all(this.shards.map((shard) => shard.client.request({ type: "export" })))
+    exportState(): TrainingEngineState {
         return {
-            population: responses.flatMap((response) => response.state?.population ?? []),
+            population: this.currentPopulation,
             bestGenome: this.bestGenome,
             bestFitness: Number.isFinite(this.bestFitness) ? this.bestFitness : 0,
             generation: this.generation,
@@ -218,7 +259,21 @@ export class MulticoreWasmTrainingEngine implements TrainingBackendEngine {
             genome.generation,
             this.backend,
         )
-        return captureReplayFrames(replayEngine, this.topology, replayConfig, genome, this.backend)
+        try {
+            return await captureReplayFrames(replayEngine, this.topology, replayConfig, genome, this.backend)
+        } finally {
+            replayEngine.dispose()
+        }
+    }
+
+    dispose(): void {
+        if (this.disposed) return
+        this.disposed = true
+        for (const shard of this.shards) shard.client.dispose()
+        this.shards.length = 0
+        this.currentPopulation = []
+        this.lastRender = undefined
+        this.pendingEvaluation = null
     }
 
     private async evolveGlobally(responses: ShardResponse[]): Promise<void> {
@@ -239,6 +294,7 @@ export class MulticoreWasmTrainingEngine implements TrainingBackendEngine {
             cursor += shard.populationSize
             return shard.client.request({ type: "install", population: next })
         }))
+        this.currentPopulation = result.genomes
         this.timings.evolutionMs = performance.now() - evolutionStartedAt
         this.bestFitness = Math.max(this.bestFitness, result.bestFitness)
         this.bestGenome = result.championGenome

@@ -23,6 +23,8 @@ interface TrainingWasmExports {
     training_init(pointer: number, length: number): number
     training_run_steps(maximum: number): number
     training_finish_generation(): void
+    training_evaluate_generation(): void
+    training_dispose(): void
     training_generation(): number
     training_progress(): number
     training_update_config(
@@ -150,7 +152,10 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
         new Float32Array(exports.memory.buffer, pointer, input.length).set(input)
         const initialized = exports.training_init(pointer, input.length)
         exports.training_dealloc_f32(pointer, input.length)
-        if (!initialized) throw new Error("Rust training engine rejected its initialization buffer")
+        if (!initialized) {
+            exports.training_dispose()
+            throw new Error("Rust training engine rejected its initialization buffer")
+        }
         this.timings = {
             initializeMs: performance.now() - startedAt,
             simulationMs: 0,
@@ -206,7 +211,7 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
                 generation,
             ),
         )
-        this.exports.training_finish_generation()
+        this.exports.training_evaluate_generation()
         const summary = this.readSlice(this.exports.training_summary_ptr(), this.exports.training_summary_len())
         const metrics = {
             populationSize: this.populationSize,
@@ -358,7 +363,15 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
             genome.generation,
             this.backend,
         )
-        return captureReplayFrames(replayEngine, this.topology, replayConfig, genome, this.backend)
+        try {
+            return await captureReplayFrames(replayEngine, this.topology, replayConfig, genome, this.backend)
+        } finally {
+            replayEngine.dispose()
+        }
+    }
+
+    dispose(): void {
+        this.exports.training_dispose()
     }
 
     private createInput(initialPopulation: Genome[] | undefined, initialGeneration: number): Float32Array {

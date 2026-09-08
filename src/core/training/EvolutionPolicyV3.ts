@@ -93,16 +93,76 @@ function percentile(values: number[], fraction: number): number {
   return ordered[Math.min(ordered.length - 1, Math.floor((ordered.length - 1) * fraction))]
 }
 
-function dominates(left: CandidateScore, right: CandidateScore): boolean {
-  return left.gaitQuality >= right.gaitQuality
-    && left.novelty >= right.novelty
-    && (left.gaitQuality > right.gaitQuality || left.novelty > right.novelty)
-}
-
 function archiveCell(progress: number, gaitQuality: number): number {
   const progressBin = Math.min(ARCHIVE_PROGRESS_BINS - 1, Math.floor(clamp(progress, 0, 1) * ARCHIVE_PROGRESS_BINS))
   const gaitBin = Math.min(ARCHIVE_GAIT_BINS - 1, Math.floor(clamp(gaitQuality, 0, 1) * ARCHIVE_GAIT_BINS))
   return progressBin * ARCHIVE_GAIT_BINS + gaitBin
+}
+
+function assignCrowding(front: CandidateScore[]): void {
+  for (const score of front) score.crowdingDistance = 0
+  for (const key of ['gaitQuality', 'novelty'] as const) {
+    const ordered = [...front].sort((left, right) => left[key] - right[key])
+    if (!ordered.length) continue
+    ordered[0].crowdingDistance = Number.POSITIVE_INFINITY
+    ordered[ordered.length - 1].crowdingDistance = Number.POSITIVE_INFINITY
+    const span = ordered[ordered.length - 1][key] - ordered[0][key]
+    if (span <= 0) continue
+    for (let index = 1; index < ordered.length - 1; index++) {
+      ordered[index].crowdingDistance += (ordered[index + 1][key] - ordered[index - 1][key]) / span
+    }
+  }
+}
+
+/** Assigns exact two-objective Pareto fronts in O(n log n) per distance band. */
+export function rankParetoScores(scores: CandidateScore[]): void {
+  const bands = new Map<string, CandidateScore[]>()
+  for (const score of scores) {
+    const key = `${score.reachedTarget ? 1 : 0}:${score.distanceBand}`
+    const band = bands.get(key)
+    if (band) band.push(score)
+    else bands.set(key, [score])
+  }
+  for (const band of bands.values()) {
+    const ordered = [...band].sort((left, right) =>
+      right.gaitQuality - left.gaitQuality
+      || right.novelty - left.novelty
+      || left.index - right.index,
+    )
+    const noveltyValues = [...new Set(ordered.map((score) => score.novelty))]
+      .sort((left, right) => right - left)
+    const noveltyIndexes = new Map(noveltyValues.map((value, index) => [value, index + 1]))
+    const rankTree = new Uint32Array(noveltyValues.length + 1)
+    const fronts: CandidateScore[][] = []
+    const queryRank = (index: number) => {
+      let rank = 0
+      for (let cursor = index; cursor > 0; cursor -= cursor & -cursor) rank = Math.max(rank, rankTree[cursor])
+      return rank
+    }
+    const recordRank = (index: number, value: number) => {
+      for (let cursor = index; cursor < rankTree.length; cursor += cursor & -cursor) {
+        rankTree[cursor] = Math.max(rankTree[cursor], value)
+      }
+    }
+
+    for (let start = 0; start < ordered.length;) {
+      let end = start + 1
+      while (end < ordered.length
+        && ordered[end].gaitQuality === ordered[start].gaitQuality
+        && ordered[end].novelty === ordered[start].novelty) end++
+      const noveltyIndex = noveltyIndexes.get(ordered[start].novelty)!
+      const rank = queryRank(noveltyIndex)
+      for (let index = start; index < end; index++) {
+        const candidate = ordered[index]
+        candidate.paretoRank = rank
+        const front = fronts[rank] ?? (fronts[rank] = [])
+        front.push(candidate)
+      }
+      recordRank(noveltyIndex, rank + 1)
+      start = end
+    }
+    for (const front of fronts) if (front) assignCrowding(front)
+  }
 }
 
 /** Coordinator-compatible policy: simulation backends provide metrics; this class alone selects and varies genomes. */
@@ -262,45 +322,20 @@ export class EvolutionPolicyV3 {
     }))
     for (const score of scores) {
       if (!descriptors.length) { score.novelty = 1; continue }
-      const distances = descriptors.map((entry) => Math.hypot(score.finalProgress - entry.progress, score.gaitQuality - entry.gait))
-        .sort((left, right) => left - right)
-      score.novelty = distances.slice(0, Math.min(5, distances.length)).reduce((sum, value) => sum + value, 0) / Math.min(5, distances.length)
+      const nearest: number[] = []
+      for (const entry of descriptors) {
+        const distance = Math.hypot(score.finalProgress - entry.progress, score.gaitQuality - entry.gait)
+        let insertion = 0
+        while (insertion < nearest.length && nearest[insertion] <= distance) insertion++
+        if (insertion < 5) nearest.splice(insertion, 0, distance)
+        if (nearest.length > 5) nearest.pop()
+      }
+      score.novelty = nearest.reduce((sum, value) => sum + value, 0) / nearest.length
     }
   }
 
   private assignParetoRanksAndCrowding(scores: CandidateScore[]): void {
-    const bands = new Map<string, CandidateScore[]>()
-    for (const score of scores) {
-      const key = `${score.reachedTarget ? 1 : 0}:${score.distanceBand}`
-      bands.set(key, [...(bands.get(key) ?? []), score])
-    }
-    for (const band of bands.values()) {
-      let remaining = [...band]
-      let rank = 0
-      while (remaining.length) {
-        const front = remaining.filter((candidate) => !remaining.some((other) => other !== candidate && dominates(other, candidate)))
-        for (const candidate of front) candidate.paretoRank = rank
-        this.assignCrowding(front)
-        const selected = new Set(front)
-        remaining = remaining.filter((candidate) => !selected.has(candidate))
-        rank++
-      }
-    }
-  }
-
-  private assignCrowding(front: CandidateScore[]): void {
-    for (const score of front) score.crowdingDistance = 0
-    for (const key of ['gaitQuality', 'novelty'] as const) {
-      const ordered = [...front].sort((left, right) => left[key] - right[key])
-      if (!ordered.length) continue
-      ordered[0].crowdingDistance = Number.POSITIVE_INFINITY
-      ordered[ordered.length - 1].crowdingDistance = Number.POSITIVE_INFINITY
-      const span = ordered[ordered.length - 1][key] - ordered[0][key]
-      if (span <= 0) continue
-      for (let index = 1; index < ordered.length - 1; index++) {
-        ordered[index].crowdingDistance += (ordered[index + 1][key] - ordered[index - 1][key]) / span
-      }
-    }
+    rankParetoScores(scores)
   }
 
   private compare(left: CandidateScore, right: CandidateScore): number {
@@ -315,14 +350,19 @@ export class EvolutionPolicyV3 {
     for (const score of scores) {
       const cell = archiveCell(score.finalProgress, score.gaitQuality)
       const current = this.archive.get(cell)
-      const candidate: EvolutionArchiveEntry = {
+      const shouldReplace = !current
+        || (score.reachedTarget !== current.reachedTarget ? score.reachedTarget
+          : score.sustainedDistance !== current.sustainedDistance
+            ? score.sustainedDistance > current.sustainedDistance
+            : score.gaitQuality > current.gaitQuality)
+      if (!shouldReplace) continue
+      this.archive.set(cell, {
         cell,
         genome: this.flattenGenome(genomes[score.index]),
         sustainedDistance: score.sustainedDistance,
         gaitQuality: score.gaitQuality,
         reachedTarget: score.reachedTarget,
-      }
-      if (!current || this.compareArchive(candidate, current) < 0) this.archive.set(cell, candidate)
+      })
     }
   }
 
@@ -475,12 +515,18 @@ export class EvolutionPolicyV3 {
     let values = 0
     for (let muscle = 0; muscle < this.topology.muscles.length; muscle++) {
       for (let component = 0; component < 3; component++) {
-        const samples = genomes.map((genome) => {
+        let mean = 0
+        let squaredDifferenceSum = 0
+        let count = 0
+        for (const genome of genomes) {
           const gene = genome.genes[muscle]
-          return component === 0 ? gene.amplitude : component === 1 ? gene.frequency / 5 : gene.phase / TWO_PI
-        })
-        const mean = samples.reduce((sum, value) => sum + value, 0) / samples.length
-        total += Math.sqrt(samples.reduce((sum, value) => sum + (value - mean) ** 2, 0) / samples.length)
+          const sample = component === 0 ? gene.amplitude : component === 1 ? gene.frequency / 5 : gene.phase / TWO_PI
+          count++
+          const difference = sample - mean
+          mean += difference / count
+          squaredDifferenceSum += difference * (sample - mean)
+        }
+        total += Math.sqrt(squaredDifferenceSum / count)
         values++
       }
     }

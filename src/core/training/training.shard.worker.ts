@@ -59,6 +59,8 @@ scope.onmessage = async (message: MessageEvent<ShardCommand>) => {
                 scope.postMessage({ id: command.id, state: engine.exportState() })
                 break
             case "dispose":
+                engine?.dispose()
+                engine = null
                 scope.postMessage({ id: command.id, ok: true })
                 scope.close()
                 break

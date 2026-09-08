@@ -15,6 +15,7 @@ import type {
     TrainingSnapshot,
 } from "@/core/types"
 import { createSeededInitialPopulation } from "@/core/genetics/population"
+import { prepareTrainingEvent } from "./trainingEventTransfer"
 
 const workerScope: DedicatedWorkerGlobalScope = self as unknown as DedicatedWorkerGlobalScope
 const PHYSICS_CHUNK_STEPS = 24
@@ -36,16 +37,10 @@ let droppedSnapshots = 0
 let pendingGeneration: ReturnType<TrainingBackendEngine["finishGeneration"]> | null = null
 let activeBackend: ActiveTrainingBackend = "wasm-scalar"
 
-/** Posts a typed event and transfers render buffers when present. */
+/** Posts a typed event without detaching engine-owned render buffers. */
 function emit(event: TrainingEvent): void {
-    const transfer: Transferable[] = []
-    if ((event.type === "snapshot" || event.type === "ready" || event.type === "paused") && event.snapshot.render) {
-        transfer.push(event.snapshot.render.positions.buffer, event.snapshot.render.centers.buffer)
-    }
-    if (event.type === "replayReady") {
-        transfer.push(event.replay.positions.buffer, event.replay.centers.buffer)
-    }
-    workerScope.postMessage(event, transfer)
+    const prepared = prepareTrainingEvent(event)
+    workerScope.postMessage(prepared.event, prepared.transfer)
 }
 
 /** Adds coordinator-owned pacing and delivery diagnostics to a backend snapshot. */
@@ -90,40 +85,61 @@ async function selectAutoBackend(): Promise<ActiveTrainingBackend> {
         }
         return performance.now() - startedAt
     }
+    let cpu: TrainingBackendEngine | null = null
+    let gpu: TrainingBackendEngine | null = null
     try {
         const warmupPopulation = createSeededInitialPopulation(topology, warmupConfig.populationSize, warmupConfig.seed, 1)
-        const cpu = await RustWasmTrainingEngine.create(topology, warmupConfig, warmupPopulation, 1, "wasm-simd")
-        const gpu = await WebGpuTrainingEngine.create(topology, { ...warmupConfig, backend: "webgpu" }, warmupPopulation, 1)
+        cpu = await RustWasmTrainingEngine.create(topology, warmupConfig, warmupPopulation, 1, "wasm-simd")
+        gpu = await WebGpuTrainingEngine.create(topology, { ...warmupConfig, backend: "webgpu" }, warmupPopulation, 1)
         const cpuMs = await benchmark(cpu)
         const gpuMs = await benchmark(gpu)
         return cpuMs / gpuMs >= 1.5 ? "webgpu" : "wasm-simd"
     } catch {
         return "wasm-simd"
+    } finally {
+        await cpu?.dispose()
+        await gpu?.dispose()
     }
 }
 
-/** Builds a fresh persistent engine from the latest serializable inputs. */
+async function createEngineForBackend(
+    backend: ActiveTrainingBackend,
+    population: Genome[],
+): Promise<TrainingBackendEngine> {
+    if (!topology || !config) throw new Error("Training engine inputs are unavailable")
+    if (backend === "legacy") {
+        return new PackedCpuTrainingEngine(topology, config, population, initialGeneration, config.policyState)
+    }
+    if (backend === "webgpu") {
+        return WebGpuTrainingEngine.create(topology, config, population, initialGeneration, false, config.policyState)
+    }
+    if (backend === "wasm-simd") {
+        return MulticoreWasmTrainingEngine.create(topology, config, population, initialGeneration, backend, config.policyState)
+    }
+    return RustWasmTrainingEngine.create(topology, config, population, initialGeneration, backend, config.policyState)
+}
+
+/** Builds a fresh persistent engine and releases every resource from its predecessor. */
 async function initializeEngine(emitReady = true): Promise<void> {
     if (!topology || !config) return
-    if (!initialPopulation) {
-        initialPopulation = createSeededInitialPopulation(topology, config.populationSize, config.seed, initialGeneration)
-    }
+    const population = initialPopulation
+        ?? createSeededInitialPopulation(topology, config.populationSize, config.seed, initialGeneration)
     droppedSnapshots = 0
     pendingGeneration = null
     activeBackend = config.backend === "auto" ? await selectAutoBackend() : await resolveBackend(config.backend)
+    const requestedBackend = activeBackend
+    const previousEngine = engine
+    engine = null
+    await previousEngine?.dispose()
+    let acceleratedError: unknown
     try {
-        engine = activeBackend === "legacy"
-            ? new PackedCpuTrainingEngine(topology, config, initialPopulation, initialGeneration, config.policyState)
-            : activeBackend === "webgpu"
-            ? await WebGpuTrainingEngine.create(topology, config, initialPopulation, initialGeneration, false, config.policyState)
-            : activeBackend === "wasm-simd"
-                ? await MulticoreWasmTrainingEngine.create(topology, config, initialPopulation, initialGeneration, activeBackend, config.policyState)
-                : await RustWasmTrainingEngine.create(topology, config, initialPopulation, initialGeneration, activeBackend, config.policyState)
-    } catch (acceleratedError) {
+        engine = await createEngineForBackend(activeBackend, population)
+    } catch (error) {
+        acceleratedError = error
         if (activeBackend === "webgpu") {
             try {
                 activeBackend = "wasm-simd"
-                engine = await MulticoreWasmTrainingEngine.create(topology, config, initialPopulation, initialGeneration, activeBackend, config.policyState)
+                engine = await createEngineForBackend(activeBackend, population)
             } catch {
                 engine = null
             }
@@ -131,19 +147,12 @@ async function initializeEngine(emitReady = true): Promise<void> {
         if (!engine && activeBackend === "wasm-simd") {
             try {
                 activeBackend = "wasm-scalar"
-                engine = await RustWasmTrainingEngine.create(
-                    topology,
-                    config,
-                    initialPopulation,
-                    initialGeneration,
-                    activeBackend,
-                    config.policyState,
-                )
+                engine = await createEngineForBackend(activeBackend, population)
             } catch {
                 engine = null
             }
         }
-        if (engine) {
+        if (engine && activeBackend !== requestedBackend) {
             emit({
                 type: "error",
                 message: acceleratedError instanceof Error
@@ -154,7 +163,7 @@ async function initializeEngine(emitReady = true): Promise<void> {
         }
         if (!engine) {
             activeBackend = "wasm-scalar"
-            engine = new PackedCpuTrainingEngine(topology, config, initialPopulation, initialGeneration, config.policyState)
+            engine = new PackedCpuTrainingEngine(topology, config, population, initialGeneration, config.policyState)
             emit({
                 type: "error",
                 message: acceleratedError instanceof Error
@@ -164,6 +173,7 @@ async function initializeEngine(emitReady = true): Promise<void> {
             })
         }
     }
+    initialPopulation = undefined
     phase = "idle"
     const snapshot = engine.getSnapshot(phase, false)
     decorateSnapshot(snapshot)
@@ -244,10 +254,18 @@ async function runChunk(): Promise<void> {
         completed = await engine.runChunk(chunkSteps, PHYSICS_CHUNK_BUDGET_MS)
     } catch (backendError) {
         if (!topology || !config) throw backendError
-        const checkpoint = await engine.exportState()
+        const failedEngine = engine
+        const checkpoint = await failedEngine.exportState()
+        await failedEngine.dispose()
+        engine = null
         activeBackend = "wasm-scalar"
         config = { ...config, policyState: checkpoint.policyState }
-        engine = await RustWasmTrainingEngine.create(topology, config, checkpoint.population, checkpoint.generation, activeBackend, checkpoint.policyState)
+        initialGeneration = checkpoint.generation
+        try {
+            engine = await RustWasmTrainingEngine.create(topology, config, checkpoint.population, checkpoint.generation, activeBackend, checkpoint.policyState)
+        } catch {
+            engine = new PackedCpuTrainingEngine(topology, config, checkpoint.population, checkpoint.generation, checkpoint.policyState)
+        }
         emit({
             type: "error",
             message: backendError instanceof Error
@@ -302,11 +320,29 @@ function scheduleChunk(delayMs = 0): void {
     if (scheduled || !running || disposed) return
     scheduled = true
     setTimeout(() => {
-        commandQueue = commandQueue.then(() => runChunk())
+        enqueue(() => runChunk())
     }, delayMs)
 }
 
 let commandQueue = Promise.resolve()
+
+/** Keeps one failed task from permanently rejecting the serialized command queue. */
+function enqueue(task: () => void | Promise<void>): void {
+    commandQueue = commandQueue.then(task).catch((error) => {
+        running = false
+        scheduled = false
+        phase = "paused"
+        try {
+            emit({
+                type: "error",
+                message: error instanceof Error ? error.message : "Unknown training worker error",
+                recoverable: false,
+            })
+        } catch {
+            // A closing worker has no remaining receiver for a final error.
+        }
+    })
+}
 
 /** Serializes async lifecycle commands so a warmup cannot overwrite a later config change. */
 async function handleCommand(command: TrainingCommand): Promise<void> {
@@ -417,7 +453,9 @@ async function handleCommand(command: TrainingCommand): Promise<void> {
             case "dispose":
                 running = false
                 disposed = true
+                await engine?.dispose()
                 engine = null
+                emit({ type: "disposed" })
                 workerScope.close()
                 break
         }
@@ -431,7 +469,7 @@ async function handleCommand(command: TrainingCommand): Promise<void> {
 }
 
 workerScope.onmessage = (event: MessageEvent<TrainingCommand>) => {
-    commandQueue = commandQueue.then(() => handleCommand(event.data))
+    enqueue(() => handleCommand(event.data))
 }
 
 export {}

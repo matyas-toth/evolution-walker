@@ -427,6 +427,10 @@ export class PackedCpuTrainingEngine implements TrainingBackendEngine {
         return captureReplayFrames(replayEngine, this.topologyDefinition, replayConfig, genome, backend)
     }
 
+    dispose(): void {
+        // Typed arrays are released with this worker-owned engine instance.
+    }
+
     private initializeGenomes(initialPopulation?: Genome[]): void {
         for (let creature = 0; creature < this.populationSize; creature++) {
             const source = initialPopulation?.[creature]

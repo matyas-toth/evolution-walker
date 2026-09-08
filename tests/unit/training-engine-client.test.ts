@@ -63,6 +63,8 @@ describe("TrainingEngineClient", () => {
 
     const pending = client.exportSession()
     client.dispose()
+    expect(FakeWorker.latest.terminated).toBe(false)
+    FakeWorker.latest.emit({ type: "disposed" })
     expect(FakeWorker.latest.terminated).toBe(true)
     await expect(pending).rejects.toThrow("disposed")
     const count = FakeWorker.latest.commands.length

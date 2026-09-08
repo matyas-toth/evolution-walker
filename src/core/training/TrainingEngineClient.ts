@@ -9,6 +9,7 @@ import type {
 } from "@/core/types"
 
 type EventListener = (event: TrainingEvent) => void
+const COORDINATOR_DISPOSE_TIMEOUT_MS = 35_000
 
 /** Browser-side owner of the persistent training coordinator worker. */
 export class TrainingEngineClient {
@@ -24,6 +25,7 @@ export class TrainingEngineClient {
     }>()
     private requestId = 0
     private disposed = false
+    private disposeTimer: ReturnType<typeof setTimeout> | null = null
 
     constructor() {
         this.worker = new Worker(new URL("./training.worker.ts", import.meta.url), {
@@ -32,6 +34,10 @@ export class TrainingEngineClient {
         })
         this.worker.onmessage = (message: MessageEvent<TrainingEvent>) => {
             const event = message.data
+            if (event.type === "disposed") {
+                this.finishDisposal()
+                return
+            }
             if (event.type === "sessionExported") {
                 const pending = this.pendingExports.get(event.requestId)
                 if (pending) {
@@ -108,15 +114,23 @@ export class TrainingEngineClient {
 
     dispose(): void {
         if (this.disposed) return
-        this.post({ type: "dispose" })
+        this.worker.postMessage({ type: "dispose" } satisfies TrainingCommand)
         this.disposed = true
-        this.worker.terminate()
+        // Allow a timed-out shard request to reject so the coordinator can terminate
+        // all nested workers before this last-resort parent-worker shutdown.
+        this.disposeTimer = setTimeout(() => this.finishDisposal(), COORDINATOR_DISPOSE_TIMEOUT_MS)
         const error = new Error("Training engine disposed")
         for (const pending of this.pendingExports.values()) pending.reject(error)
         this.pendingExports.clear()
         for (const pending of this.pendingReplays.values()) pending.reject(error)
         this.pendingReplays.clear()
         this.listeners.clear()
+    }
+
+    private finishDisposal(): void {
+        if (this.disposeTimer) clearTimeout(this.disposeTimer)
+        this.disposeTimer = null
+        this.worker.terminate()
     }
 
     private post(command: TrainingCommand): void {

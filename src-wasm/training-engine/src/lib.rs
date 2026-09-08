@@ -86,13 +86,26 @@ impl Engine {
         if input.len() < 14 {
             return None;
         }
-        let population = input[0] as usize;
-        let particle_count = input[1] as usize;
-        let constraint_count = input[2] as usize;
-        let muscle_count = input[3] as usize;
-        if population == 0 || particle_count == 0 {
+        let count = |value: f32| -> Option<usize> {
+            if !value.is_finite() || value < 0.0 || value.fract() != 0.0 { None } else { Some(value as usize) }
+        };
+        let population = count(input[0])?;
+        let particle_count = count(input[1])?;
+        let constraint_count = count(input[2])?;
+        let muscle_count = count(input[3])?;
+        let total_generation_steps = count(input[4])?;
+        let generation = count(input[5])?;
+        if population == 0 || population > 2_000 || particle_count == 0 {
             return None;
         }
+        let particle_values = particle_count.checked_mul(7)?;
+        let constraint_values = constraint_count.checked_mul(5)?;
+        let genome_stride = muscle_count.checked_mul(3)?;
+        let genome_len = population.checked_mul(genome_stride)?;
+        let expected_length = 14usize.checked_add(particle_values)?
+            .checked_add(constraint_values)?
+            .checked_add(genome_len)?;
+        if expected_length > input.len() { return None; }
         let mut cursor = 14;
         let mut particles = Vec::with_capacity(particle_count);
         let mut head_index = 0;
@@ -118,23 +131,27 @@ impl Engine {
             if cursor + 5 > input.len() {
                 return None;
             }
+            let p1 = count(input[cursor])?;
+            let p2 = count(input[cursor + 1])?;
+            let muscle_value = input[cursor + 4];
+            if p1 >= particle_count || p2 >= particle_count || !muscle_value.is_finite()
+                || muscle_value.fract() != 0.0 || muscle_value < -1.0
+                || muscle_value >= muscle_count as f32 {
+                return None;
+            }
             constraints.push(ConstraintDef {
-                p1: input[cursor] as usize,
-                p2: input[cursor + 1] as usize,
+                p1,
+                p2,
                 length: input[cursor + 2],
                 stiffness: input[cursor + 3],
-                muscle: input[cursor + 4] as i32,
+                muscle: muscle_value as i32,
             });
             cursor += 5;
         }
-        let genome_len = population * muscle_count * 3;
-        if cursor + genome_len > input.len() {
-            return None;
-        }
         let genomes = input[cursor..cursor + genome_len].to_vec();
-        let particle_len = population * particle_count;
-        let oscillator_len = population * muscle_count;
-        let genome_stride = muscle_count * 3;
+        let particle_len = population.checked_mul(particle_count)?;
+        let oscillator_len = population.checked_mul(muscle_count)?;
+        let evaluation_metrics_len = population.checked_mul(10)?;
         let support_y = particles.iter().filter(|particle| particle.support_group > 0)
             .map(|particle| particle.y).fold(particles[head_index].y, f32::max);
         let initial_standing_height = (support_y - particles[head_index].y).max(1.0);
@@ -142,8 +159,8 @@ impl Engine {
             population,
             particle_count,
             muscle_count,
-            total_generation_steps: input[4].max(1.0) as usize,
-            generation: input[5].max(1.0) as u32,
+            total_generation_steps: total_generation_steps.max(1),
+            generation: generation.max(1).min(u32::MAX as usize) as u32,
             current_step: 0,
             mutation_rate: input[7],
             mutation_strength: input[8],
@@ -177,7 +194,7 @@ impl Engine {
             support_contact_mask: vec![0; population],
             last_support_transition_step: vec![-6; population],
             last_grounded_group: vec![-1; population],
-            evaluation_metrics: vec![0.0; population * 10],
+            evaluation_metrics: vec![0.0; evaluation_metrics_len],
             fitness: vec![0.0; population],
             oscillator_sin: vec![0.0; oscillator_len],
             oscillator_cos: vec![0.0; oscillator_len],
@@ -399,7 +416,7 @@ impl Engine {
         }
     }
 
-    fn finish_generation(&mut self) {
+    fn evaluate_generation(&mut self) {
         let mut best_fitness = f32::NEG_INFINITY;
         let mut total_fitness = 0.0;
         let mut best_index = 0usize;
@@ -475,10 +492,20 @@ impl Engine {
             self.alive_frames[best_index] as f32 / self.total_generation_steps.max(1) as f32,
             self.support_transitions[best_index] as f32,
         ];
+    }
+
+    fn finish_generation(&mut self) {
+        self.evaluate_generation();
         self.evolve();
         self.generation += 1;
         self.current_step = 0;
         self.reset_population();
+    }
+
+    fn finish_external_generation(&mut self) {
+        self.evaluate_generation();
+        self.generation += 1;
+        self.current_step = 0;
     }
 
     fn tournament(&mut self, ranked: &[usize], parent_count: usize) -> usize {
@@ -595,6 +622,23 @@ pub extern "C" fn training_run_steps(maximum: usize) -> i32 {
 pub extern "C" fn training_finish_generation() {
     if let Some(engine) = engine_mut() {
         engine.finish_generation();
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn training_evaluate_generation() {
+    if let Some(engine) = engine_mut() {
+        engine.finish_external_generation();
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn training_dispose() {
+    unsafe {
+        if !ENGINE.is_null() {
+            drop(Box::from_raw(ENGINE));
+            ENGINE = std::ptr::null_mut();
+        }
     }
 }
 
@@ -787,6 +831,30 @@ mod tests {
         assert!(Engine::from_input(&zero_population).is_none());
         let truncated = &test_input(2, 1, 3)[..20];
         assert!(Engine::from_input(truncated).is_none());
+        let mut oversized_population = test_input(1, 1, 3);
+        oversized_population[0] = 2_001.0;
+        assert!(Engine::from_input(&oversized_population).is_none());
+        let mut fractional_population = test_input(1, 1, 3);
+        fractional_population[0] = 10.5;
+        assert!(Engine::from_input(&fractional_population).is_none());
+        let mut non_finite_steps = test_input(1, 1, 3);
+        non_finite_steps[4] = f32::INFINITY;
+        assert!(Engine::from_input(&non_finite_steps).is_none());
+        let mut invalid_constraint = test_input(1, 1, 3);
+        invalid_constraint[28] = 99.0;
+        assert!(Engine::from_input(&invalid_constraint).is_none());
+    }
+
+    #[test]
+    fn external_generation_evaluation_preserves_genomes_for_global_policy() {
+        let mut engine = test_engine(8, 2, 29);
+        engine.run_steps(2);
+        let genomes = engine.genomes.clone();
+        engine.finish_external_generation();
+        assert_eq!(engine.genomes, genomes);
+        assert_eq!(engine.generation, 2);
+        assert_eq!(engine.current_step, 0);
+        assert!(engine.summary.iter().all(|value| value.is_finite()));
     }
 
     #[test]

@@ -22,6 +22,10 @@ describe("training configuration and world", () => {
     })
     expect(resolved).toMatchObject({ backend: "auto", workerCount: "auto", snapshotHz: 30, simulationSpeed: 0.1 })
     expect(resolveTrainingEngineConfig({ ...base, snapshotHz: 0 }).snapshotHz).toBe(1)
+    expect(resolveTrainingEngineConfig({ ...base, populationSize: 50_000, workerCount: 99 })).toMatchObject({
+      populationSize: 2_000,
+      workerCount: 12,
+    })
   })
 
   it("centralizes exact target geometry", () => {

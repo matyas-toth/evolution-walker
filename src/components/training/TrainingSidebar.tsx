@@ -170,9 +170,11 @@ export function TrainingSidebar({
                     <Button
                         variant={isRunning ? "destructive" : "default"}
                         className="flex-1 flex items-center justify-center gap-2"
+                        disabled={pausePending}
                         onClick={onToggleStart}
                     >
-                        {isRunning ? <><Square className="w-4 h-4 fill-current" /> Pause Evolution</> :
+                        {pausePending ? <><Square className="w-4 h-4 fill-current" /> Pausing…</> :
+                            isRunning ? <><Square className="w-4 h-4 fill-current" /> Pause Evolution</> :
                             isPaused ? <><Play className="w-4 h-4 fill-current" /> Resume</> :
                                 <><Play className="w-4 h-4 fill-current" /> Start Evolution</>}
                     </Button>

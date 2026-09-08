@@ -32,4 +32,5 @@ export interface TrainingBackendEngine {
     getBestGenome(): Genome | null
     exportState(): TrainingEngineState | Promise<TrainingEngineState>
     createReplay(genome: Genome): Promise<PackedTrainingReplay>
+    dispose(): void | Promise<void>
 }

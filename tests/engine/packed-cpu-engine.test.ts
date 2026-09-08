@@ -85,4 +85,16 @@ describe("PackedCpuTrainingEngine", () => {
     expect(snapshot.diagnostics.archiveCoverage).toBeGreaterThan(0)
     expect(snapshot.diagnostics.bestDistance).toBe(checkpoint.policyState?.bestSustainedDistance)
   })
+
+  it("completes and evolves the maximum supported population", async () => {
+    const config = createTrainingConfig({ populationSize: 2_000, backgroundMode: true })
+    const engine = new PackedCpuTrainingEngine(createTestTopology(), config)
+
+    const evaluated = await finish(engine)
+
+    expect(evaluated.generation).toBe(1)
+    expect(Number.isFinite(evaluated.bestFitness)).toBe(true)
+    expect(engine.exportState().population).toHaveLength(2_000)
+    engine.dispose()
+  })
 })

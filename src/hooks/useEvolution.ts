@@ -135,6 +135,10 @@ export function useEvolution(props: UseEvolutionProps) {
         const unsubscribe = client.subscribe((event) => {
             if (event.type === "error") {
                 setError(event.message)
+                if (!event.recoverable) {
+                    setPhase("paused")
+                    setPausePending(false)
+                }
                 return
             }
             if (event.type === "generation") {
@@ -166,7 +170,7 @@ export function useEvolution(props: UseEvolutionProps) {
                 return
             }
             if (event.type === "backendChanged" || event.type === "sessionExported"
-                || event.type === "replayReady" || event.type === "replayFailed") return
+                || event.type === "replayReady" || event.type === "replayFailed" || event.type === "disposed") return
             const snapshot = event.snapshot
             if (event.type === "paused") setPausePending(false)
             startTransition(() => {
@@ -195,13 +199,11 @@ export function useEvolution(props: UseEvolutionProps) {
     const start = useCallback(() => {
         setError(null)
         setPausePending(false)
-        setPhase("running")
         clientRef.current?.start()
     }, [])
 
     const stop = useCallback(() => {
         setPausePending(true)
-        setPhase("paused")
         clientRef.current?.pause()
     }, [])
 

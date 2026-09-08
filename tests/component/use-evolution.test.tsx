@@ -60,9 +60,15 @@ describe("useEvolution", () => {
       snapshot: { phase: "idle", generation: 1, progress: 0, bestFitness: 0, averageFitness: 0, diagnostics },
     }))
     act(() => result.current.start())
+    expect(result.current.phase).toBe("idle")
+    act(() => client.emit({
+      type: "snapshot",
+      snapshot: { phase: "running", generation: 1, progress: 0, bestFitness: 0, averageFitness: 0, diagnostics },
+    }))
     expect(result.current.phase).toBe("running")
     expect(client.start).toHaveBeenCalledOnce()
     act(() => result.current.stop())
+    expect(result.current.phase).toBe("running")
     expect(result.current.pausePending).toBe(true)
     expect(client.pause).toHaveBeenCalledOnce()
     act(() => client.emit({

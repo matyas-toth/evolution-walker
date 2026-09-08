@@ -4,6 +4,8 @@ import {
   CandidateMetricOffset,
   CANDIDATE_METRIC_STRIDE,
   EvolutionPolicyV3,
+  rankParetoScores,
+  type CandidateScore,
 } from '@/core/training/EvolutionPolicyV3'
 import { createAsymmetricTwoLegTopology, createTrainingConfig } from '../fixtures/training'
 
@@ -40,6 +42,63 @@ function metrics(rows: Array<Partial<Record<keyof typeof CandidateMetricOffset, 
 }
 
 describe('EvolutionPolicyV3', () => {
+  const candidate = (index: number, gaitQuality: number, novelty: number, distanceBand = 1): CandidateScore => ({
+    index,
+    sustainedDistance: 100,
+    finalProgress: 0.1,
+    maxProgress: 0.1,
+    gaitQuality,
+    survival: 1,
+    alternatingTransitions: 1,
+    reachedTarget: false,
+    distanceBand,
+    novelty,
+    paretoRank: 0,
+    crowdingDistance: 0,
+    fitness: 100,
+  })
+
+  it('matches reference non-dominated sorting across bands and exact ties', () => {
+    const scores = Array.from({ length: 120 }, (_, index) => candidate(
+      index,
+      (index * 37 % 17) / 16,
+      (index * 53 % 19) / 18,
+      index % 3,
+    ))
+    scores.push(candidate(120, scores[0].gaitQuality, scores[0].novelty, scores[0].distanceBand))
+    const remainingByBand = new Map<string, CandidateScore[]>()
+    for (const score of scores) {
+      const key = `${score.reachedTarget ? 1 : 0}:${score.distanceBand}`
+      const band = remainingByBand.get(key)
+      if (band) band.push(score)
+      else remainingByBand.set(key, [score])
+    }
+    const expected = new Map<number, number>()
+    for (const initial of remainingByBand.values()) {
+      let remaining = [...initial]
+      let rank = 0
+      while (remaining.length) {
+        const front = remaining.filter((left) => !remaining.some((right) => right !== left
+          && right.gaitQuality >= left.gaitQuality
+          && right.novelty >= left.novelty
+          && (right.gaitQuality > left.gaitQuality || right.novelty > left.novelty)))
+        for (const score of front) expected.set(score.index, rank)
+        const selected = new Set(front)
+        remaining = remaining.filter((score) => !selected.has(score))
+        rank++
+      }
+    }
+
+    rankParetoScores(scores)
+    expect(scores.map((score) => score.paretoRank)).toEqual(scores.map((score) => expected.get(score.index)))
+  })
+
+  it('ranks a 2,000-candidate dominance chain without quadratic front rescans', () => {
+    const scores = Array.from({ length: 2_000 }, (_, index) => candidate(index, 2_000 - index, 2_000 - index))
+    rankParetoScores(scores)
+    expect(scores.map((score) => score.paretoRank)).toEqual(Array.from({ length: 2_000 }, (_, index) => index))
+  })
+
   it('always ranks a farther distance band above perfect gait in a lower band', () => {
     const policy = new EvolutionPolicyV3(createAsymmetricTwoLegTopology(), createTrainingConfig({ populationSize: 2, targetDistance: 1_100 }))
     const result = policy.evaluateAndEvolve(genomes(2), metrics([
