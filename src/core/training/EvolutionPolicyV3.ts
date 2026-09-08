@@ -302,7 +302,8 @@ export class EvolutionPolicyV3 {
       : 0
     const gaitQuality = clamp(survival * (0.45 * alternation + 0.35 * upright + 0.2 * (1 - airborne)), 0, 1)
     const reachedTarget = values[base + CandidateMetricOffset.reachedTarget] > 0
-    const distanceBand = Math.floor(sustainedDistance / Math.max(5, targetRange / 200))
+    // Keep gait as a near-tie preference without hiding incremental forward gains.
+    const distanceBand = Math.floor(sustainedDistance / Math.max(0.5, targetRange / 2600))
     return {
       index,
       sustainedDistance,
@@ -417,7 +418,7 @@ export class EvolutionPolicyV3 {
   private tournament(ranked: number[], scores: CandidateScore[]): number {
     const parentCount = Math.max(1, Math.floor(ranked.length * this.config.parentsTopPercent))
     let selected = ranked[Math.floor(this.random.next() * parentCount)]
-    for (let index = 1; index < 3; index++) {
+    for (let index = 1; index < 2; index++) {
       const candidate = ranked[Math.floor(this.random.next() * parentCount)]
       if (this.compare(scores[candidate], scores[selected]) < 0) selected = candidate
     }
@@ -426,7 +427,8 @@ export class EvolutionPolicyV3 {
 
   private makeChild(parentA: Genome, parentB: Genome, parentAScore: CandidateScore, generation: number, exploration: boolean): Genome {
     const groups = new Map<number, boolean>()
-    for (const group of this.muscleGroups) if (!groups.has(group)) groups.set(group, this.random.next() < 0.6)
+    // Mostly retain a coordinated controller; occasionally exchange a whole limb module.
+    for (const group of this.muscleGroups) if (!groups.has(group)) groups.set(group, this.random.next() < 0.9)
     const genes = this.topology.muscles.map((muscle, muscleIndex) => {
       const useA = groups.get(this.muscleGroups[muscleIndex]) ?? (parentAScore.gaitQuality >= 0.5)
       const source = (useA ? parentA : parentB).genes.find((gene) => gene.muscleId === muscle.id)
@@ -446,19 +448,20 @@ export class EvolutionPolicyV3 {
   private mutate(genes: Genome['genes'], exploration: boolean): void {
     const strength = this.config.mutationStrength * (exploration ? Math.min(2.5, 1.5 + this.stagnationGenerations / 100) : 1)
     const rate = this.config.mutationRate
-    const cadenceShift = this.random.next() < rate * 0.15 ? this.random.gaussian() * 0.35 * strength : 0
+    // Explore cadence and phase more than independent frequencies that desynchronize limbs.
+    const cadenceShift = this.random.next() < rate * 0.8 ? this.random.gaussian() * 0.7 * strength : 0
     const phaseShifts = new Map<number, number>()
     for (const group of this.muscleGroups) {
-      if (group >= 0 && !phaseShifts.has(group) && this.random.next() < rate * 0.35) {
+      if (group >= 0 && !phaseShifts.has(group) && this.random.next() < rate * 0.7) {
         phaseShifts.set(group, this.random.gaussian() * Math.PI * strength)
       }
     }
     genes.forEach((gene, index) => {
       if (this.random.next() < rate) gene.amplitude = clamp(gene.amplitude + this.random.gaussian() * 0.12 * strength, 0.05, 0.8)
-      if (this.random.next() < rate) gene.frequency = clamp(gene.frequency + this.random.gaussian() * 0.45 * strength, 0.1, 5)
+      if (this.random.next() < rate) gene.frequency = clamp(gene.frequency + this.random.gaussian() * 0.2 * strength, 0.1, 5)
       gene.frequency = clamp(gene.frequency + cadenceShift, 0.1, 5)
       const groupShift = phaseShifts.get(this.muscleGroups[index]) ?? 0
-      const residual = this.random.next() < rate ? this.random.gaussian() * 0.45 * strength : 0
+      const residual = this.random.next() < rate ? this.random.gaussian() * 1.2 * strength : 0
       gene.phase = wrapPhase(gene.phase + groupShift + residual)
     })
   }

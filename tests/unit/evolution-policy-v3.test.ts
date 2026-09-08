@@ -99,11 +99,11 @@ describe('EvolutionPolicyV3', () => {
     expect(scores.map((score) => score.paretoRank)).toEqual(Array.from({ length: 2_000 }, (_, index) => index))
   })
 
-  it('always ranks a farther distance band above perfect gait in a lower band', () => {
+  it('rewards a one-pixel forward gain over perfect gait in a lower distance band', () => {
     const policy = new EvolutionPolicyV3(createAsymmetricTwoLegTopology(), createTrainingConfig({ populationSize: 2, targetDistance: 1_100 }))
     const result = policy.evaluateAndEvolve(genomes(2), metrics([
       { finalCenterX: 400, maxCenterX: 400, alternatingTransitions: 20, airborneFrames: 0 },
-      { finalCenterX: 420, maxCenterX: 420, alternatingTransitions: 0, airborneFrames: 600, headHeightSum: 0 },
+      { finalCenterX: 401, maxCenterX: 401, alternatingTransitions: 0, airborneFrames: 600, headHeightSum: 0 },
     ]), 1)
     expect(result.bestIndex).toBe(1)
   })
@@ -122,7 +122,7 @@ describe('EvolutionPolicyV3', () => {
     const policy = new EvolutionPolicyV3(createAsymmetricTwoLegTopology(), createTrainingConfig({ populationSize: 2, targetDistance: 1_100 }))
     const result = policy.evaluateAndEvolve(genomes(2), metrics([
       { finalCenterX: 400, alternatingTransitions: 0, airborneFrames: 600, headHeightSum: 0 },
-      { finalCenterX: 401, alternatingTransitions: 20, airborneFrames: 0, headHeightSum: 60_000 },
+      { finalCenterX: 400.1, alternatingTransitions: 20, airborneFrames: 0, headHeightSum: 60_000 },
     ]), 1)
     expect(result.scores[0].distanceBand).toBe(result.scores[1].distanceBand)
     expect(result.bestIndex).toBe(1)
