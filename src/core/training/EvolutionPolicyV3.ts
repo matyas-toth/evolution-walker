@@ -193,6 +193,12 @@ export class EvolutionPolicyV3 {
   }
 
   updateConfig(config: TrainingEngineConfig): void {
+    if (config.targetDistance !== this.config.targetDistance) {
+      // Contact with the previous target says nothing about the new target.
+      // Keep the genomes and search history, but re-evaluate success on the next run.
+      if (this.champion) this.champion.reachedTarget = false
+      for (const entry of this.archive.values()) entry.reachedTarget = false
+    }
     this.config = config
   }
 

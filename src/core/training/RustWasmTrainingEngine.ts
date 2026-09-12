@@ -169,8 +169,10 @@ export class RustWasmTrainingEngine implements TrainingBackendEngine {
     }
 
     updateConfig(config: TrainingEngineConfig): void {
+        const targetChanged = config.targetDistance !== this.config.targetDistance
         this.config = config
         this.policy.updateConfig(config)
+        if (targetChanged) this.bestFitness = this.policy.getChampionFitness()
         this.wasm().training_update_config(
             config.mutationRate,
             config.mutationStrength,

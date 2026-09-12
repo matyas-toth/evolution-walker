@@ -107,6 +107,38 @@ describe("useEvolution", () => {
     expect(client.reset).toHaveBeenCalledOnce()
   })
 
+  it("continues from a victory with the existing population and chart history", () => {
+    const topology = createTestTopology()
+    const { result } = renderHook(() => useEvolution({ ...createTrainingConfig(), topology }))
+    const client = clientHarness.instances.at(-1)
+    const genome = createGenome({ generation: 7 })
+
+    act(() => client.emit({ type: "generation", generation: 7, bestFitness: 1500, averageFitness: 44, bestGenome: genome }))
+    act(() => client.emit({
+      type: "targetReached",
+      genome,
+      generation: 7,
+      snapshot: { phase: "paused", generation: 7, progress: 100, bestFitness: 1500, averageFitness: 44, diagnostics },
+    }))
+    const history = result.current.fitnessHistory
+    const champion = result.current.bestCreatureEver
+
+    act(() => result.current.continueTraining(1900))
+
+    expect(client.updateConfig).toHaveBeenLastCalledWith(expect.objectContaining({ targetDistance: 1900 }))
+    expect(client.start).toHaveBeenCalledOnce()
+    expect(client.reset).not.toHaveBeenCalled()
+    expect(result.current.generation).toBe(7)
+    expect(result.current.fitnessHistory).toBe(history)
+    expect(result.current.bestCreatureEver).toBe(champion)
+    act(() => client.emit({
+      type: "snapshot",
+      snapshot: { phase: "paused", generation: 7, progress: 100, bestFitness: 200, averageFitness: 44, diagnostics },
+    }))
+    expect(result.current.bestCreatureEver?.genome).toBe(champion?.genome)
+    expect(result.current.bestCreatureEver?.fitness.total).toBe(200)
+  })
+
   it("surfaces engine errors and delegates export/replay requests", async () => {
     const topology = createTestTopology()
     const config = createTrainingConfig()

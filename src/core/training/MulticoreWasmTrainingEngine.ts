@@ -155,8 +155,10 @@ export class MulticoreWasmTrainingEngine implements TrainingBackendEngine {
     }
 
     updateConfig(config: TrainingEngineConfig): void {
+        const targetChanged = config.targetDistance !== this.config.targetDistance
         this.config = config
         this.policy.updateConfig(config)
+        if (targetChanged) this.bestFitness = this.policy.getChampionFitness()
         for (const shard of this.shards) {
             const shardConfig = { ...config, populationSize: shard.populationSize, workerCount: 1 }
             void shard.client.request({ type: "update", config: shardConfig }).catch(() => {

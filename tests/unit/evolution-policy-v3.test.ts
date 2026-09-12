@@ -118,6 +118,33 @@ describe('EvolutionPolicyV3', () => {
     expect(result.targetIndex).toBe(1)
   })
 
+  it('keeps the population and archive when pushing the target further without treating old contact as a new victory', () => {
+    const config = createTrainingConfig({ populationSize: 2, targetDistance: 1_100 })
+    const policy = new EvolutionPolicyV3(createAsymmetricTwoLegTopology(), config)
+    const first = policy.evaluateAndEvolve(genomes(2), metrics([
+      { finalCenterX: 300, reachedTarget: 1 },
+      { finalCenterX: 350 },
+    ]), 1)
+    const before = policy.exportState()
+    expect(before.champion?.reachedTarget).toBe(true)
+
+    policy.updateConfig({ ...config, targetDistance: 1_900 })
+
+    const continued = policy.exportState()
+    expect(continued.rngState).toBe(before.rngState)
+    expect(continued.archive.map((entry) => entry.genome)).toEqual(before.archive.map((entry) => entry.genome))
+    expect(continued.champion?.genome).toEqual(before.champion?.genome)
+    expect(continued.champion?.reachedTarget).toBe(false)
+    expect(continued.archive.every((entry) => !entry.reachedTarget)).toBe(true)
+    expect(policy.getChampionFitness()).toBeLessThan(1_000)
+
+    policy.evaluateAndEvolve(first.genomes, metrics([
+      { finalCenterX: 300 },
+      { finalCenterX: 600 },
+    ]), 2)
+    expect(policy.exportState().champion?.sustainedDistance).toBeGreaterThan(before.champion!.sustainedDistance)
+  })
+
   it('uses gait quality to discriminate candidates inside one distance band', () => {
     const policy = new EvolutionPolicyV3(createAsymmetricTwoLegTopology(), createTrainingConfig({ populationSize: 2, targetDistance: 1_100 }))
     const result = policy.evaluateAndEvolve(genomes(2), metrics([

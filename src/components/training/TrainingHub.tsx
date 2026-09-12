@@ -150,6 +150,7 @@ export function TrainingHub({
     requestReplay,
     start,
     stop,
+    continueTraining,
     reset,
   } = useEvolution(evolutionProps);
 
@@ -225,12 +226,9 @@ export function TrainingHub({
       setReplayData(null);
       setReplayPhase({ type: "none" });
       setConfig((prev) => ({ ...prev, targetDistance: newTargetDistance }));
-      // Reset the targetReachedFired flag by resetting + starting fresh
-      reset();
-      // Small delay so config state propagates before start
-      setTimeout(() => start(), 50);
+      continueTraining(newTargetDistance);
     },
-    [reset, start],
+    [continueTraining],
   );
 
   const handleSaveProgress = useCallback(

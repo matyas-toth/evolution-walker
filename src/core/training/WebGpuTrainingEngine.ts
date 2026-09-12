@@ -426,7 +426,12 @@ export class WebGpuTrainingEngine implements TrainingBackendEngine {
         void device.lost.then(() => { this.deviceLost = true })
     }
 
-    updateConfig(config: TrainingEngineConfig): void { this.config = config; this.policy.updateConfig(config) }
+    updateConfig(config: TrainingEngineConfig): void {
+        const targetChanged = config.targetDistance !== this.config.targetDistance
+        this.config = config
+        this.policy.updateConfig(config)
+        if (targetChanged) this.bestFitness = this.policy.getChampionFitness()
+    }
     getGeneration(): number { return this.generation }
     getProgress(): number { return this.currentStep / Math.max(1, Math.round(this.config.generationDuration * 60)) * 100 }
 

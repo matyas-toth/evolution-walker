@@ -75,6 +75,27 @@ describe("PackedCpuTrainingEngine", () => {
     expect(engine.getGeneration()).toBe(1)
   })
 
+  it("continues after victory with the evolved population and policy checkpoint", async () => {
+    const config = createTrainingConfig({ populationSize: 1, targetDistance: 100 })
+    const engine = new PackedCpuTrainingEngine(createTestTopology(), config, [createGenome()])
+    expect((await finish(engine)).targetIndex).toBe(0)
+    const before = engine.exportState()
+
+    engine.updateConfig({ ...config, targetDistance: 700 })
+
+    const continued = engine.exportState()
+    expect(continued.generation).toBe(before.generation)
+    expect(continued.population).toEqual(before.population)
+    expect(continued.policyState?.rngState).toBe(before.policyState?.rngState)
+    expect(continued.policyState?.champion?.genome).toEqual(before.policyState?.champion?.genome)
+    expect(continued.policyState?.champion?.reachedTarget).toBe(false)
+    expect(continued.bestFitness).toBeLessThan(before.bestFitness)
+
+    const next = await finish(engine)
+    expect(next.generation).toBe(before.generation)
+    expect(engine.exportState().generation).toBe(before.generation + 1)
+  })
+
   it("restores the v3 champion, archive, and stagnation state across backend checkpoints", async () => {
     const topology = createTestTopology()
     const config = createTrainingConfig({ populationSize: 4 })

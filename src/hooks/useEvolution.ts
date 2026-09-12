@@ -173,6 +173,9 @@ export function useEvolution(props: UseEvolutionProps) {
                 || event.type === "replayReady" || event.type === "replayFailed" || event.type === "disposed") return
             const snapshot = event.snapshot
             if (event.type === "paused") setPausePending(false)
+            setBestCreatureEver((previous) => previous && previous.fitness.total !== snapshot.bestFitness
+                ? { ...previous, fitness: { ...previous.fitness, total: snapshot.bestFitness } }
+                : previous)
             startTransition(() => {
                 setPhase(snapshot.phase)
                 setGeneration(snapshot.generation)
@@ -206,6 +209,15 @@ export function useEvolution(props: UseEvolutionProps) {
         setPausePending(true)
         clientRef.current?.pause()
     }, [])
+
+    const continueTraining = useCallback((targetDistance: number) => {
+        const client = clientRef.current
+        if (!client) return
+        setError(null)
+        setPausePending(false)
+        client.updateConfig({ ...engineConfig, targetDistance })
+        client.start()
+    }, [engineConfig])
 
     const reset = useCallback(() => {
         setPhase("idle")
@@ -244,6 +256,7 @@ export function useEvolution(props: UseEvolutionProps) {
         pausePending,
         start,
         stop,
+        continueTraining,
         reset,
         exportSession,
         requestReplay,
