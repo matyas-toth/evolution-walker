@@ -16,6 +16,7 @@ env:
   RUST_VERSION: "1.93.1"
   AUTH_SECRET: "ci-only-auth-secret-with-at-least-32-characters"
   AUTH_TRUST_HOST: "true"
+  DATABASE_URL: "mysql://ci:ci@127.0.0.1:1/evolution_ci_placeholder"
 
 jobs:
   static-quality:

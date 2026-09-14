@@ -11,7 +11,6 @@ import { signOut } from "next-auth/react";
 import Link from "next/link";
 import { LayoutDashboard, Dna, LogOut, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import {
   Tooltip,
   TooltipContent,

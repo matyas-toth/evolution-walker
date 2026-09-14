@@ -45,4 +45,16 @@ describe("simulation factories", () => {
     expect(config.groundY).toBe(864)
     expect(config.targetZone.x).toBe(1344)
   })
+
+  it("derives ground and target geometry from the browser viewport", () => {
+    vi.stubGlobal("window", { innerWidth: 1280, innerHeight: 720 })
+    try {
+      const config = createDefaultConfig()
+      expect(config.worldBounds).toEqual({ left: 0, right: 1280, top: 0, bottom: 720 })
+      expect(config.groundY).toBe(576)
+      expect(config.targetZone).toMatchObject({ x: 896, y: 476 })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
 })

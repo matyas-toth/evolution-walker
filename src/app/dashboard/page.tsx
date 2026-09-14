@@ -6,7 +6,7 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
-import { Dna, ArrowRight, Activity } from "lucide-react";
+import { Dna, ArrowRight } from "lucide-react";
 import {
   TrainingSessionsTable,
   type DashboardTrainingSession,
