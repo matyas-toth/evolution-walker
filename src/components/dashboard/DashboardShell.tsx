@@ -39,8 +39,8 @@ export function DashboardShell({ user, children }: DashboardShellProps) {
 
   return (
     <div className="flex h-screen overflow-hidden p-4">
-      <aside className="flex flex-col w-[260px] shrink-0 border-x border-y border-border bg-card/50 rounded-xl">
-        <div className="flex items-center gap-2 h-14 px-4 border-b border-border bg-card rounded-xl">
+      <aside className="flex flex-col w-[260px] shrink-0 border-x border-y border-border bg-card/50 rounded-xl corner-superellipse/1.33">
+        <div className="flex items-center gap-2 h-14 px-4 border-b border-border m-0.5 bg-card rounded-xl corner-superellipse/1.33">
           <svg
             width="20"
             height="20"
@@ -134,7 +134,7 @@ export function DashboardShell({ user, children }: DashboardShellProps) {
           </TooltipProvider>
         </nav>
 
-        <div className="mt-auto border-t rounded-xl bg-card border-border p-3">
+        <div className="mt-auto border-t rounded-xl corner-superellipse/1.33 m-0.5 bg-card border-border p-3">
           <div className="flex items-center gap-3 px-2 mb-3">
             <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary text-xs font-bold shrink-0">
               {(user.name?.[0] ?? user.email[0]).toUpperCase()}

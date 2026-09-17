@@ -261,9 +261,9 @@ export function CreaturesGrid({ creatures: initial }: CreaturesGridProps) {
           {creatures.map((creature) => (
             <div
               key={creature.id}
-              className="group relative flex flex-col rounded-xl border border-border bg-card overflow-hidden transition-colors hover:border-primary/30"
+              className="group relative flex flex-col rounded-xl corner-superellipse/1.33 border border-border bg-card overflow-hidden transition-colors hover:border-primary/30"
             >
-              <div className="h-40 bg-background rounded-xl border-b border-border p-4 relative">
+              <div className="h-40 bg-background rounded-xl  border-b border-border p-4 relative">
                 <TopologyPreview topology={creature.topology} />
                 {creature.hasReachedTarget && (
                   <div

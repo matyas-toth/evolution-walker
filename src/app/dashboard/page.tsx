@@ -73,7 +73,7 @@ export default async function DashboardPage() {
       <div className="grid gap-4 sm:grid-cols-2">
         <Link
           href="/dashboard/creatures"
-          className="group flex flex-col gap-4 rounded-xl border border-border bg-card p-6 transition-colors hover:border-primary/30"
+          className="group flex flex-col gap-4 rounded-xl corner-superellipse/1.33 border border-border bg-card p-6 transition-colors hover:border-primary/30"
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-primary/10">
