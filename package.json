@@ -8,7 +8,7 @@
   "packageManager": "npm@10.9.2",
   "scripts": {
     "dev": "next dev",
-    "build": "npx prisma migrate deploy && npx prisma generate && next build",
+    "build": "npx prisma generate && next build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings=0",
     "build:wasm": "wat2wasm src-wasm/scripts/physics-scripts.wat -o public/physics.wasm",
@@ -38,7 +38,7 @@
     "db:shell": "docker compose -f compose.dev.yml exec db mariadb -uapp -papp app",
     "db:reset": "docker compose -f compose.dev.yml down -v && docker compose -f compose.dev.yml up -d",
     "setup": "run-s db:generate build:engine",
-    "start": "next start"
+    "start": "prisma migrate deploy && next start"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",
