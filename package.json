@@ -8,7 +8,7 @@
   "packageManager": "npm@10.9.2",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "npx prisma migrate deploy && npx prisma generate && next build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings=0",
     "build:wasm": "wat2wasm src-wasm/scripts/physics-scripts.wat -o public/physics.wasm",
