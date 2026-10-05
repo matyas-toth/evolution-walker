@@ -31,6 +31,8 @@ let phase: TrainingSnapshot["phase"] = "idle"
 let running = false
 let disposed = false
 let scheduled = false
+let chunkTimer: ReturnType<typeof setTimeout> | undefined
+let scheduleEpoch = 0
 let lastSnapshotAt = 0
 let lastGenerationEventAt = 0
 let droppedSnapshots = 0
@@ -319,9 +321,21 @@ async function runChunk(): Promise<void> {
 function scheduleChunk(delayMs = 0): void {
     if (scheduled || !running || disposed) return
     scheduled = true
-    setTimeout(() => {
-        enqueue(() => runChunk())
+    const epoch = scheduleEpoch
+    chunkTimer = setTimeout(() => {
+        chunkTimer = undefined
+        enqueue(() => {
+            if (epoch === scheduleEpoch) return runChunk()
+        })
     }, delayMs)
+}
+
+/** Invalidates both pending timers and already queued tasks from the previous run. */
+function cancelScheduledChunk(): void {
+    clearTimeout(chunkTimer)
+    chunkTimer = undefined
+    scheduled = false
+    scheduleEpoch++
 }
 
 let commandQueue = Promise.resolve()
@@ -330,7 +344,7 @@ let commandQueue = Promise.resolve()
 function enqueue(task: () => void | Promise<void>): void {
     commandQueue = commandQueue.then(task).catch((error) => {
         running = false
-        scheduled = false
+        cancelScheduledChunk()
         phase = "paused"
         try {
             emit({
@@ -349,6 +363,7 @@ async function handleCommand(command: TrainingCommand): Promise<void> {
     try {
         switch (command.type) {
             case "init":
+                cancelScheduledChunk()
                 topology = command.topology
                 config = command.config
                 initialPopulation = command.initialPopulation
@@ -366,6 +381,7 @@ async function handleCommand(command: TrainingCommand): Promise<void> {
                 break
             case "pause":
                 running = false
+                cancelScheduledChunk()
                 phase = "paused"
                 emitPendingGeneration(true)
                 if (engine && config) {
@@ -376,6 +392,7 @@ async function handleCommand(command: TrainingCommand): Promise<void> {
                 break
             case "reset":
                 running = false
+                cancelScheduledChunk()
                 initialPopulation = undefined
                 initialGeneration = 1
                 if (config) config = { ...config, policyState: undefined }
@@ -390,23 +407,36 @@ async function handleCommand(command: TrainingCommand): Promise<void> {
             case "updateConfig": {
                 const previousConfig = config
                 const backendChanged = Boolean(previousConfig && previousConfig.backend !== command.config.backend)
-                const requiresFreshPopulation = !previousConfig
+                const requiresRebuild = !previousConfig
                     || previousConfig.populationSize !== command.config.populationSize
                     || previousConfig.generationDuration !== command.config.generationDuration
                     || previousConfig.seed !== command.config.seed
                     || previousConfig.workerCount !== command.config.workerCount
                 config = command.config
-                if (backendChanged && !requiresFreshPopulation && engine) {
+                if ((backendChanged || requiresRebuild) && engine && previousConfig) {
                     const previousPhase = phase
                     const resumeAfterMigration = running
                     const previousProgress = engine.getProgress()
                     const checkpoint = await engine.exportState()
                     running = false
-                    initialPopulation = checkpoint.population
+                    cancelScheduledChunk()
+                    emitPendingGeneration(true)
+                    initialPopulation = checkpoint.population.slice(0, config.populationSize)
+                    const champion = checkpoint.bestGenome
+                    if (previousConfig.populationSize !== config.populationSize && champion
+                        && !initialPopulation.some(g => JSON.stringify(g.genes) === JSON.stringify(champion.genes))) {
+                        if (initialPopulation.length < config.populationSize) initialPopulation.push(champion)
+                        else initialPopulation[initialPopulation.length - 1] = champion
+                    }
+                    if (initialPopulation.length < config.populationSize) {
+                        const immigrants = createSeededInitialPopulation(topology!, config.populationSize, config.seed ^ checkpoint.generation, checkpoint.generation)
+                        initialPopulation.push(...immigrants.slice(initialPopulation.length))
+                    }
                     initialGeneration = checkpoint.generation
                     config = { ...config, policyState: checkpoint.policyState }
                     await initializeEngine(false)
-                    await restoreGenerationProgress(previousProgress)
+                    // Duration/size changes restart only the partial evaluation, not the search.
+                    if (!requiresRebuild) await restoreGenerationProgress(previousProgress)
                     phase = previousPhase
                     const migratedSnapshot = engine.getSnapshot(phase, !config.backgroundMode)
                     decorateSnapshot(migratedSnapshot)
@@ -415,13 +445,19 @@ async function handleCommand(command: TrainingCommand): Promise<void> {
                         : { type: "snapshot", snapshot: migratedSnapshot })
                     running = resumeAfterMigration
                     if (running) scheduleChunk()
-                } else if (requiresFreshPopulation) {
+                } else if (requiresRebuild) {
                     running = false
+                    cancelScheduledChunk()
                     initialPopulation = undefined
                     initialGeneration = 1
                     await initializeEngine()
                 } else {
                     engine?.updateConfig(command.config)
+                    // Apply live pacing changes immediately instead of waiting for an old slow timer.
+                    if (running) {
+                        cancelScheduledChunk()
+                        scheduleChunk()
+                    }
                     if (!running && engine) {
                         const updatedSnapshot = engine.getSnapshot(phase, !command.config.backgroundMode)
                         decorateSnapshot(updatedSnapshot)
@@ -452,6 +488,7 @@ async function handleCommand(command: TrainingCommand): Promise<void> {
                 break
             case "dispose":
                 running = false
+                cancelScheduledChunk()
                 disposed = true
                 await engine?.dispose()
                 engine = null

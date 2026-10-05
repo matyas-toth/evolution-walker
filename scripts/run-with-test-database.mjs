@@ -65,6 +65,11 @@ try {
     ...process.env,
     DATABASE_URL: databaseUrl,
     TEST_DATABASE_URL: databaseUrl,
+    DATABASE_HOST: host,
+    DATABASE_PORT: String(port),
+    DATABASE_USER: TEST_USER,
+    DATABASE_PASSWORD: TEST_PASSWORD,
+    DATABASE_DB: TEST_DATABASE,
     AUTH_SECRET: "integration-test-secret-that-is-never-used-in-production",
     AUTH_URL: "http://127.0.0.1:3100",
   }

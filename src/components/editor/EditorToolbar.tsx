@@ -69,6 +69,8 @@ export function EditorToolbar({ tool, onToolChange, onUndo, onRedo, canUndo, can
                         <Tooltip key={t.id}>
                             <TooltipTrigger asChild>
                                 <Button
+                                    aria-label={t.label}
+                                    disabled={isPreviewMode}
                                     variant="ghost"
                                     size="icon"
                                     className={cn(
@@ -94,7 +96,7 @@ export function EditorToolbar({ tool, onToolChange, onUndo, onRedo, canUndo, can
 
                 <Tooltip>
                     <TooltipTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-9 w-9 rounded-lg" onClick={onUndo} disabled={!canUndo}>
+                        <Button aria-label="Undo" variant="ghost" size="icon" className="h-9 w-9 rounded-lg" onClick={onUndo} disabled={!canUndo || isPreviewMode}>
                             <Undo2 className="h-4 w-4" />
                         </Button>
                     </TooltipTrigger>
@@ -103,7 +105,7 @@ export function EditorToolbar({ tool, onToolChange, onUndo, onRedo, canUndo, can
 
                 <Tooltip>
                     <TooltipTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-9 w-9 rounded-lg" onClick={onRedo} disabled={!canRedo}>
+                        <Button aria-label="Redo" variant="ghost" size="icon" className="h-9 w-9 rounded-lg" onClick={onRedo} disabled={!canRedo || isPreviewMode}>
                             <Redo2 className="h-4 w-4" />
                         </Button>
                     </TooltipTrigger>
@@ -115,6 +117,7 @@ export function EditorToolbar({ tool, onToolChange, onUndo, onRedo, canUndo, can
                 <Tooltip>
                     <TooltipTrigger asChild>
                         <Button
+                            aria-label={isPreviewMode ? "Stop Preview" : "Start Preview"}
                             variant="ghost"
                             size="icon"
                             className={cn(

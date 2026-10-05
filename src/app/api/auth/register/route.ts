@@ -8,8 +8,7 @@ import { NextResponse } from "next/server"
 import bcrypt from "bcryptjs"
 import { z } from "zod"
 import { prisma } from "@/lib/prisma"
-import { Prisma } from "@/generated/prisma/client"
-import { STICKMAN_TOPOLOGY } from "@/core/topology"
+import { defaultCreatureData } from "@/lib/defaultCreature"
 
 const registerSchema = z.object({
     name: z.string().min(1).max(100),
@@ -47,10 +46,7 @@ export async function POST(request: Request) {
                 email,
                 password: hashedPassword,
                 creatures: {
-                    create: {
-                        name: "Stickman",
-                        topology: JSON.parse(JSON.stringify(STICKMAN_TOPOLOGY)) as Prisma.InputJsonValue,
-                    },
+                    create: defaultCreatureData(),
                 },
             },
         })

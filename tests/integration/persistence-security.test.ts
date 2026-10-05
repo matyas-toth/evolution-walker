@@ -17,6 +17,7 @@ import {
 import { saveGenome, getGenomes } from "@/app/actions/genomes"
 import { saveTrainingSession, getTrainingSessions, deleteTrainingSession } from "@/app/actions/sessions"
 import { findOwnedTrainingSession } from "@/lib/trainingSessionAccess"
+import { createAuthAdapter } from "@/lib/authAdapter"
 
 async function clearDatabase() {
   await prisma.trainingSession.deleteMany()
@@ -55,7 +56,7 @@ describe("registration", () => {
     expect(response.status).toBe(201)
     const user = await prisma.user.findUnique({ where: { email: "ada@example.test" }, include: { creatures: true } })
     expect(user?.password).not.toBe("password")
-    expect(await bcrypt.compare("password", user!.password)).toBe(true)
+    expect(await bcrypt.compare("password", user!.password!)).toBe(true)
     expect(user?.creatures.map(creature => creature.name)).toEqual(["Stickman"])
 
     const duplicate = await register(new Request("http://test/api/auth/register", {
@@ -63,6 +64,23 @@ describe("registration", () => {
       body: JSON.stringify({ name: "Ada", email: "ada@example.test", password: "password" }),
     }))
     expect(duplicate.status).toBe(409)
+  })
+})
+
+describe("OAuth adapter onboarding", () => {
+  it("creates a passwordless user and default creature, links the account, and reads it back", async () => {
+    const adapter = createAuthAdapter(prisma)
+    const user = await adapter.createUser!({
+      id: "provider-input-id", email: "google@example.test", name: "Google Walker", image: null, emailVerified: new Date(),
+    })
+    const stored = await prisma.user.findUniqueOrThrow({ where: { id: user.id }, include: { creatures: true } })
+    expect(stored.password).toBeNull()
+    expect(stored.creatures.map(creature => creature.name)).toEqual(["Stickman"])
+    await adapter.linkAccount!({ userId: user.id, provider: "google", providerAccountId: "google-sub", type: "oidc" })
+    expect(await adapter.getUserByAccount!({ provider: "google", providerAccountId: "google-sub" })).toMatchObject({ id: user.id })
+    await adapter.deleteUser!(user.id)
+    expect(await prisma.creature.count({ where: { userId: user.id } })).toBe(0)
+    expect(await prisma.account.count({ where: { userId: user.id } })).toBe(0)
   })
 })
 

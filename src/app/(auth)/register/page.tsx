@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Loader2 } from "lucide-react"
+import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton"
 
 export default function RegisterPage() {
     const router = useRouter()
@@ -77,6 +78,7 @@ export default function RegisterPage() {
                 <CardDescription>Start designing and evolving creatures</CardDescription>
             </CardHeader>
             <CardContent>
+                <GoogleSignInButton disabled={loading} />
                 <form onSubmit={handleSubmit} className="flex flex-col gap-4">
                     {error && (
                         <div className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
@@ -152,7 +154,7 @@ export default function RegisterPage() {
 
                     <p className="text-sm text-center text-muted-foreground">
                         Already have an account?{" "}
-                        <Link href="/login" className="text-primary hover:underline underline-offset-4">
+                        <Link href="/login" className="text-primary underline underline-offset-4">
                             Sign in
                         </Link>
                     </p>

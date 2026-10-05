@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Loader2 } from "lucide-react"
+import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton"
 
 export default function LoginPage() {
     const router = useRouter()
@@ -55,6 +56,7 @@ export default function LoginPage() {
                 <CardDescription>Enter your credentials to continue</CardDescription>
             </CardHeader>
             <CardContent>
+                <GoogleSignInButton disabled={loading} />
                 <form onSubmit={handleSubmit} className="flex flex-col gap-4">
                     {error && (
                         <div className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">

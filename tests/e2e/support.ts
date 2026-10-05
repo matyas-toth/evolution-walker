@@ -17,7 +17,10 @@ export function uniqueIdentity(testInfo: TestInfo, prefix = "thesis"): TestIdent
 }
 
 export async function register(page: Page, identity: TestIdentity) {
-  await page.goto("/register")
+  await Promise.all([
+    page.waitForResponse(response => response.url().endsWith("/api/auth/providers")),
+    page.goto("/register"),
+  ])
   await page.getByLabel("Name").fill(identity.name)
   await page.getByLabel("Email").fill(identity.email)
   await page.getByLabel("Password", { exact: true }).fill(identity.password)
@@ -27,7 +30,10 @@ export async function register(page: Page, identity: TestIdentity) {
 }
 
 export async function login(page: Page, identity: TestIdentity) {
-  await page.goto("/login")
+  await Promise.all([
+    page.waitForResponse(response => response.url().endsWith("/api/auth/providers")),
+    page.goto("/login"),
+  ])
   await page.getByLabel("Email").fill(identity.email)
   await page.getByLabel("Password").fill(identity.password)
   await page.getByRole("button", { name: "Sign in" }).click()

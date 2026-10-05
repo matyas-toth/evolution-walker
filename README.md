@@ -71,9 +71,17 @@ The deployable Rust artifacts are committed as `public/training-engine-scalar.wa
 
 Open [http://localhost:3000](http://localhost:3000).
 
+### Google sign-in (optional)
+
+Create a Web application OAuth client in Google Cloud and configure `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET` in `.env`. Register `http://localhost:3000/api/auth/callback/google` as an authorized redirect URI, plus `https://<your-host>/api/auth/callback/google` for production. Restart the server after changing these variables. Both values must be present for the Google button to appear on login and registration.
+
+Apply the migrations and regenerate Prisma Client before using Google sign-in. OAuth-only accounts have a nullable local password and receive a default Stickman. Existing password accounts are not automatically linked by matching email; sign in with the original password if Auth.js reports `OAuthAccountNotLinked`. See the [Auth.js Google provider documentation](https://authjs.dev/getting-started/providers/google).
+
 ### Database configuration
 
 Prisma CLI reads `DATABASE_URL` through `prisma.config.ts`. The application uses Prisma 7's `PrismaMariaDb` driver adapter. At runtime it prefers `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_USER`, `DATABASE_PASSWORD`, and `DATABASE_DB`; if those are absent it parses `DATABASE_URL`.
+
+The generated client explicitly uses `moduleFormat = "cjs"` so Next.js and the CommonJS Playwright runner can load the same output. This prevents the runner from evaluating ESM-only `import.meta` code. See [Prisma generator options](https://www.prisma.io/docs/orm/v7/prisma-schema/overview/generators).
 
 Useful commands:
 
@@ -96,6 +104,8 @@ The Training Hub chooses a backend automatically, or you can force `webgpu`, `wa
 ```
 
 Fresh training and reset use the gait-aware seed population. Loading a saved session never replaces its genomes. Switching compute backend exports and imports the current population, then replays the partial generation so visible progress is retained.
+
+Changing population size or generation duration while paused preserves the generation, champion, archive, and chart history. Only the unfinished evaluation restarts. Population growth keeps existing genomes and fills the additional slots with seeded candidates; shrinking retains the champion. Resume continues the same search.
 
 The progress chart reports all-time best sustained distance, generation p90 distance, generation median distance, and the target reference. Policy-v2 and policy-v3 compatibility fitness values are not directly comparable; use sustained distance and fixed-budget quality benchmarks instead.
 

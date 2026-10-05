@@ -8,7 +8,7 @@
 
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Save, Loader2 } from "lucide-react";
+import { ArrowLeft, Save, Loader2, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useEditorState } from "@/hooks/useEditorState";
@@ -34,20 +34,26 @@ export function CreatureEditor({
   const [name, setName] = useState(initialName);
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  const handleSave = useCallback(async () => {
+  const handleSave = useCallback(async (trainAfterSave = false) => {
     setSaving(true);
+    setSaveError(null);
     try {
       const res = await fetch(`/api/creatures/${creatureId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, topology: state.topology }),
       });
-      if (res.ok) setLastSaved(new Date());
+      if (!res.ok) throw new Error("Could not save the creature. Please try again.");
+      setLastSaved(new Date());
+      if (trainAfterSave) router.push(`/dashboard/creatures/${creatureId}/train`);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Could not save the creature.");
     } finally {
       setSaving(false);
     }
-  }, [creatureId, name, state.topology]);
+  }, [creatureId, name, state.topology, router]);
 
   const handleCanvasClick = useCallback(
     (worldX: number, worldY: number) => {
@@ -144,11 +150,13 @@ export function CreatureEditor({
             variant="ghost"
             size="icon"
             className="h-8 w-8"
+            aria-label="Back to creatures"
             onClick={() => router.push("/dashboard/creatures")}
           >
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <Input
+            aria-label="Creature name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             className="h-8 w-48 text-sm font-medium bg-transparent border-transparent hover:border-border focus:border-border"
@@ -160,7 +168,7 @@ export function CreatureEditor({
               Saved {lastSaved.toLocaleTimeString()}
             </span>
           )}
-          <Button size="sm" onClick={handleSave} disabled={saving}>
+          <Button size="sm" variant="outline" onClick={() => handleSave()} disabled={saving || state.isPreviewMode}>
             {saving ? (
               <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
             ) : (
@@ -168,8 +176,14 @@ export function CreatureEditor({
             )}
             {saving ? "Saving..." : "Save"}
           </Button>
+          <Button size="sm" onClick={() => handleSave(true)} disabled={saving || state.isPreviewMode}>
+            <Play className="mr-2 h-3.5 w-3.5" />
+            Train
+          </Button>
         </div>
       </div>
+
+      {saveError && <p role="alert" className="px-4 py-2 text-sm text-destructive">{saveError}</p>}
 
       <div className="flex flex-1 overflow-hidden">
         <div className="flex items-start p-3">
@@ -205,12 +219,6 @@ export function CreatureEditor({
           tool={state.tool}
           onUpdateParticle={(id, updates) =>
             dispatch({ type: "UPDATE_PARTICLE", id, updates })
-          }
-          onUpdateConstraint={(id, updates) =>
-            dispatch({ type: "UPDATE_CONSTRAINT", id, updates })
-          }
-          onUpdateMuscle={(id, updates) =>
-            dispatch({ type: "UPDATE_MUSCLE", id, updates })
           }
         />
       </div>

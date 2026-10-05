@@ -47,6 +47,15 @@ test("training supports live pacing, pause, backend preservation, resume, and re
   await expect(page.getByTestId("fitness-chart").locator("circle")).toHaveCount(historyBeforeSwitch)
   await expect(page.getByRole("button", { name: "Resume" })).toBeVisible()
 
+  await page.getByRole("slider", { name: "Population Size" }).press("Home")
+  await expect(page.getByText("Population Size: 10", { exact: true })).toBeVisible()
+  await expect(metric(page, "Generation")).toHaveText(String(generationBeforeSwitch))
+  await page.getByRole("slider", { name: "Generation Duration" }).press("Home")
+  await expect(page.getByText("Generation Duration (s): 3", { exact: true })).toBeVisible()
+  await expect(metric(page, "Generation")).toHaveText(String(generationBeforeSwitch))
+  await expect(page.getByTestId("fitness-chart").locator("circle")).toHaveCount(historyBeforeSwitch)
+  await expect(page.getByRole("button", { name: "Resume" })).toBeVisible()
+
   await speed.press("End")
   await page.getByRole("button", { name: "Resume" }).click()
   await expect.poll(async () => Number(await metric(page, "Generation").textContent()), { timeout: 20_000 }).toBeGreaterThan(generationBeforeSwitch)

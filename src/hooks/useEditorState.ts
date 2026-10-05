@@ -45,6 +45,23 @@ function pushHistory(state: EditorState): EditorState {
     return { ...state, history: newHistory, historyIndex: newHistory.length - 1 }
 }
 
+/** Keeps passive link lengths tied to the editor geometry without changing saved material properties. */
+function withAutomaticLengths(topology: Topology, particleId: string): Topology {
+    const positions = new Map(topology.particles.map(p => [p.id, p.initialPos]))
+    const length = (p1Id: string, p2Id: string, previous: number) => {
+        const p1 = positions.get(p1Id)
+        const p2 = positions.get(p2Id)
+        return p1 && p2 ? Math.hypot(p2.x - p1.x, p2.y - p1.y) : previous
+    }
+    return {
+        ...topology,
+        constraints: topology.constraints.map(c => c.p1Id === particleId || c.p2Id === particleId
+            ? { ...c, restLength: length(c.p1Id, c.p2Id, c.restLength) } : c),
+        muscles: topology.muscles.map(m => m.p1Id === particleId || m.p2Id === particleId
+            ? { ...m, baseLength: length(m.p1Id, m.p2Id, m.baseLength) } : m),
+    }
+}
+
 function editorReducer(state: EditorState, action: EditorAction): EditorState {
     if (state.isPreviewMode && action.type !== "TOGGLE_PREVIEW") {
         return state; // Block all edits during preview mode
@@ -61,6 +78,7 @@ function editorReducer(state: EditorState, action: EditorAction): EditorState {
             return { ...state, pendingConnection: action.particleId }
 
         case "ADD_PARTICLE": {
+            if (state.topology.particles.some(p => p.id === action.particle.id)) return state
             const s = pushHistory(state)
             const isFirst = s.topology.particles.length === 0
             const newParticle = { ...action.particle, isHead: isFirst }
@@ -97,15 +115,13 @@ function editorReducer(state: EditorState, action: EditorAction): EditorState {
             if (action.updates.isHead === true) {
                 newParticles = newParticles.map(p => ({ ...p, isHead: false }))
             }
-            return {
-                ...s,
-                topology: {
-                    ...s.topology,
-                    particles: newParticles.map((p) =>
-                        p.id === action.id ? { ...p, ...action.updates } : p
-                    ),
-                },
+            const topology = {
+                ...s.topology,
+                particles: newParticles.map((p) =>
+                    p.id === action.id ? { ...p, ...action.updates } : p
+                ),
             }
+            return { ...s, topology: action.updates.initialPos ? withAutomaticLengths(topology, action.id) : topology }
         }
 
         case "UPDATE_CONSTRAINT": {
@@ -137,12 +153,12 @@ function editorReducer(state: EditorState, action: EditorAction): EditorState {
         case "MOVE_PARTICLE": {
             return {
                 ...state,
-                topology: {
+                topology: withAutomaticLengths({
                     ...state.topology,
                     particles: state.topology.particles.map((p) =>
                         p.id === action.id ? { ...p, initialPos: { x: action.x, y: action.y } } : p
                     ),
-                },
+                }, action.id),
             }
         }
 
@@ -225,11 +241,16 @@ export function useEditorState(initial: Topology) {
 
     const counterRef = useRef({ particle: initial.particles.length, constraint: initial.constraints.length, muscle: initial.muscles.length })
 
-    const nextId = useCallback((prefix: string) => {
-        const key = prefix as keyof typeof counterRef.current
-        counterRef.current[key]++
-        return `${prefix}-${counterRef.current[key]}`
-    }, [])
+    const nextId = useCallback((prefix: keyof typeof counterRef.current) => {
+        const occupied = new Set([
+            ...state.topology.particles, ...state.topology.constraints, ...state.topology.muscles,
+        ].map(element => element.id))
+        let id: string
+        do {
+            id = `${prefix}-${++counterRef.current[prefix]}`
+        } while (occupied.has(id))
+        return id
+    }, [state.topology])
 
     const addParticle = useCallback((x: number, y: number) => {
         const id = nextId("particle")

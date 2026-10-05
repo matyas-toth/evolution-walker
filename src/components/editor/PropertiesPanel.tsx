@@ -6,12 +6,13 @@
 
 "use client"
 
+import { useId } from "react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import type { Topology, TopologyParticle, TopologyConstraint, TopologyMuscle } from "@/core/types"
+import type { Topology, TopologyParticle } from "@/core/types"
 import type { SelectedElement, EditorTool } from "@/hooks/useEditorState"
 
 interface PropertiesPanelProps {
@@ -19,17 +20,17 @@ interface PropertiesPanelProps {
     selected: SelectedElement | null
     tool: EditorTool
     onUpdateParticle: (id: string, updates: Partial<TopologyParticle>) => void
-    onUpdateConstraint: (id: string, updates: Partial<TopologyConstraint>) => void
-    onUpdateMuscle: (id: string, updates: Partial<TopologyMuscle>) => void
 }
 
 function NumberField({ label, value, onChange, min, max, step = 0.1 }: {
     label: string; value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number
 }) {
+    const id = useId()
     return (
         <div className="flex flex-col gap-1.5">
-            <Label className="text-xs text-muted-foreground">{label}</Label>
+            <Label htmlFor={id} className="text-xs text-muted-foreground">{label}</Label>
             <Input
+                id={id}
                 type="number"
                 value={value}
                 onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
@@ -43,7 +44,7 @@ function NumberField({ label, value, onChange, min, max, step = 0.1 }: {
 }
 
 export function PropertiesPanel({
-    topology, selected, tool, onUpdateParticle, onUpdateConstraint, onUpdateMuscle,
+    topology, selected, tool, onUpdateParticle,
 }: PropertiesPanelProps) {
     if (!selected) {
         return (
@@ -158,9 +159,7 @@ export function PropertiesPanel({
                             <p className="font-mono text-sm mt-0.5">{constraint.p2Id}</p>
                         </div>
                     </div>
-                    <NumberField label="Rest Length" value={Math.round(constraint.restLength * 10) / 10} onChange={(restLength) => onUpdateConstraint(constraint.id, { restLength })} min={1} step={1} />
-                    <NumberField label="Stiffness" value={constraint.stiffness} onChange={(stiffness) => onUpdateConstraint(constraint.id, { stiffness })} min={0} max={1} step={0.05} />
-                    <NumberField label="Damping" value={constraint.damping} onChange={(damping) => onUpdateConstraint(constraint.id, { damping })} min={0} max={1} step={0.01} />
+                    <p className="text-xs text-muted-foreground">Length (automatic): {constraint.restLength.toFixed(1)} px</p>
                 </div>
             </div>
         )
@@ -185,9 +184,7 @@ export function PropertiesPanel({
                             <p className="font-mono text-sm mt-0.5">{muscle.p2Id}</p>
                         </div>
                     </div>
-                    <NumberField label="Base Length" value={Math.round(muscle.baseLength * 10) / 10} onChange={(baseLength) => onUpdateMuscle(muscle.id, { baseLength })} min={1} step={1} />
-                    <NumberField label="Stiffness" value={muscle.stiffness} onChange={(stiffness) => onUpdateMuscle(muscle.id, { stiffness })} min={0} max={1} step={0.05} />
-                    <NumberField label="Damping" value={muscle.damping} onChange={(damping) => onUpdateMuscle(muscle.id, { damping })} min={0} max={1} step={0.01} />
+                    <p className="text-xs text-muted-foreground">Length (automatic): {muscle.baseLength.toFixed(1)} px</p>
                 </div>
             </div>
         )
