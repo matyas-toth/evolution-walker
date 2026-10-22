@@ -33,7 +33,7 @@ The deployable Rust artifacts are committed as `public/training-engine-scalar.wa
 
 ## Prerequisites
 
-- Node.js **22.19 or newer** and npm 10. The dependency set includes Undici 8, which raises the effective minimum above the original Node 22.12 target.
+- Node.js **24.22.1** and npm 10. `.nvmrc` pins that release. Railpack installs the exact version from `.nvmrc`, which is the October 21, 2026 security release. A major-only pin such as `24` resolves to the newest 24.x that is at least 14 days old, so it would miss this release.
 - Rust **1.93.1** (pinned by `rust-toolchain.toml`).
 - The `wasm32-unknown-unknown` Rust target. Rustup installs it from the toolchain file; otherwise run `rustup target add wasm32-unknown-unknown`.
 - Docker Desktop or another Docker-compatible runtime for integration, E2E, and benchmark tests.
@@ -93,7 +93,7 @@ npx prisma migrate status
 npx prisma studio
 ```
 
-Production deployments should run `npm run db:migrate:deploy` before starting the application. Never use `migrate dev` against production.
+Production deployments should run `npm run db:migrate:deploy` before starting the application. Never use `migrate dev` against production. `npm start` does both. Coolify Railpack reads `.nvmrc` and installs that Node.js version.
 
 ## Training and saved sessions
 
@@ -177,4 +177,6 @@ Confirm the seed, topology, population size, duration, target distance, and poli
 
 ## Dependency security
 
-The 2026-09-01 upgrade removed all fixable critical/high runtime findings. `npm audit` still reports upstream-only findings in Prisma 7.10's CLI configuration dependency and the MariaDB copy nested inside `@prisma/adapter-mariadb`; npm provides no compatible fix. The direct runtime `mariadb` dependency is 3.5.3. Re-check with `npm audit` on every package upgrade and do not apply the suggested Prisma 6 downgrade.
+Next.js 16.4.2 includes the October 14, 2026 fixes (16.4.1 or newer). React and React DOM stay on the 19.2 patched release, 19.2.9 or newer. Sharp is 0.35.5 or newer. Vitest is 4.1.12 or newer.
+
+`npm audit` still reports `braces` through `eslint-config-next` and the `shadcn` CLI. Every published `braces` release is flagged, and the only npm suggestion is a breaking downgrade to `shadcn@1.0.0`. Those packages are development tools, not the production server. Re-check with `npm audit` on every package upgrade and do not apply that downgrade.
