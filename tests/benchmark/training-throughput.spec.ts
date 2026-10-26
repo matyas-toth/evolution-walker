@@ -81,7 +81,7 @@ test("records the seeded production training matrix", async ({ page }) => {
           await setSlider(sliders.nth(0), population, 10, 10)
           await setSlider(sliders.nth(2), generationDuration, 3, 1)
           await sliders.nth(5).press("End")
-          const backgroundSwitch = page.getByRole("switch")
+          const backgroundSwitch = page.getByRole("switch", { name: "Background Mode" })
           const desiredBackground = mode === "background"
           if ((await backgroundSwitch.isChecked()) !== desiredBackground) await backgroundSwitch.click()
           if (!desiredBackground) await sliders.nth(1).press("End")

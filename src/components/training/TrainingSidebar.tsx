@@ -6,11 +6,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
 import { Brain, Save, Play, Square, Loader2 } from "lucide-react";
 import type { TrainingDiagnostics, TrainingHubConfig } from "@/core/types";
 import { toast } from "sonner";
 
 interface TrainingSidebarProps {
+  showOnlyBest: boolean;
+  onShowOnlyBestChange: (checked: boolean) => void;
   config: TrainingHubConfig;
   onChangeConfig: (config: TrainingHubConfig) => void;
   isRunning: boolean;
@@ -28,6 +36,8 @@ interface TrainingSidebarProps {
 }
 
 export function TrainingSidebar({
+  showOnlyBest,
+  onShowOnlyBestChange,
   config,
   onChangeConfig,
   isRunning,
@@ -254,6 +264,20 @@ export function TrainingSidebar({
             rendering.
           </p>
         </div>
+
+        <FieldGroup className="gap-3">
+          <Field orientation="horizontal">
+            <FieldLabel htmlFor="training-show-only-best">
+              Show only the best
+            </FieldLabel>
+            <Switch
+              id="training-show-only-best"
+              aria-describedby="training-show-only-best-description"
+              checked={showOnlyBest}
+              onCheckedChange={onShowOnlyBestChange}
+            />
+          </Field>
+        </FieldGroup>
 
         <div className="space-y-2">
           <Label htmlFor="training-backend">Compute Backend</Label>

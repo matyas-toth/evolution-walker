@@ -76,6 +76,7 @@ export function TrainingHub({
     null,
   );
   const [isSaving, setIsSaving] = useState(false);
+  const [showOnlyBest, setShowOnlyBest] = useState(false);
 
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
@@ -282,7 +283,7 @@ export function TrainingHub({
                 creatures={creatures}
                 groundY={TRAINING_GROUND_Y}
                 targetZone={getTrainingTargetZone(config.targetDistance)}
-                showCount={5}
+                showCount={showOnlyBest ? 1 : 5}
                 dimmed={isReplayActive}
               />
             ) : (
@@ -326,6 +327,8 @@ export function TrainingHub({
         </div>
 
         <TrainingSidebar
+          showOnlyBest={showOnlyBest}
+          onShowOnlyBestChange={setShowOnlyBest}
           config={config}
           onChangeConfig={setConfig}
           isRunning={isRunning}

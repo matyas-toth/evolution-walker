@@ -77,8 +77,8 @@ model Genome {
   id            String   @id @default(cuid())
   creature      Creature @relation(fields: [creatureId], references: [id], onDelete: Cascade)
   creatureId    String
-  name          String?  // Optional custom name for the training run
-  weights       Json     // Custom weights/offsets
+  name          String?  
+  weights       Json     
   fitness       Float
   reachedTarget Boolean  @default(false)
   createdAt     DateTime @default(now())
@@ -86,17 +86,16 @@ model Genome {
   @@index([creatureId])
 }
 
-/** Snapshot of a full training session: population + hub settings. */
 model TrainingSession {
   id             String   @id @default(cuid())
   creature       Creature @relation(fields: [creatureId], references: [id], onDelete: Cascade)
   creatureId     String
   name           String?
-  config         Json     // Serialized TrainingHubConfig
-  population     Json     // Serialized Genome[] (full generation)
-  bestGenome     Json     // Best genome of the session (cached for leaderboard)
+  config         Json     
+  population     Json     
+  bestGenome     Json     
   bestFitness    Float
-  generation     Int      // Last completed generation number
+  generation     Int      
   reachedTarget  Boolean  @default(false)
   targetDistance Float
   createdAt      DateTime @default(now())

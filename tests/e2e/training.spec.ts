@@ -32,6 +32,13 @@ test("training supports live pacing, pause, backend preservation, resume, and re
   await expect(page.getByText("Simulation Speed: 100x")).toBeVisible()
   await page.getByRole("button", { name: "Start Evolution" }).click()
   await expect(page.getByRole("button", { name: "Pause Evolution" })).toBeVisible()
+  const bestOnly = page.getByRole("switch", { name: "Show only the best" })
+  await expect(bestOnly).not.toBeChecked()
+  await bestOnly.click()
+  await expect(bestOnly).toBeChecked()
+  await expect(page.getByRole("button", { name: "Pause Evolution" })).toBeVisible()
+  await bestOnly.click()
+  await expect(bestOnly).not.toBeChecked()
   await expect.poll(async () => Number(await metric(page, "Generation").textContent()), { timeout: 20_000 }).toBeGreaterThan(1)
 
   await speed.press("Home")
@@ -132,7 +139,7 @@ test("target contact atomically pauses and opens the exact fixed-camera victory 
   const sliders = page.getByRole("slider")
   await sliders.nth(2).press("Home")
   await sliders.nth(5).press("Home")
-  await page.getByRole("switch").click()
+  await page.getByRole("switch", { name: "Background Mode" }).click()
   await page.getByRole("button", { name: "Start Evolution" }).click()
 
   await expect(page.getByRole("heading", { name: "Target Distance Reached" })).toBeVisible({ timeout: 60_000 })

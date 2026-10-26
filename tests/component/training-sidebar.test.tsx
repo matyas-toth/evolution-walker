@@ -26,6 +26,8 @@ const diagnostics: TrainingDiagnostics = {
 
 function renderSidebar(overrides: Record<string, unknown> = {}) {
   const props = {
+    showOnlyBest: false,
+    onShowOnlyBestChange: vi.fn(),
     creatureId: "creature-1",
     config: createTrainingConfig(),
     onChangeConfig: vi.fn(),
@@ -47,6 +49,20 @@ function renderSidebar(overrides: Record<string, unknown> = {}) {
 }
 
 describe("TrainingSidebar", () => {
+  it("allows changing the display filter mid-run without changing training configuration", async () => {
+    const { props, rerender } = renderSidebar({ isRunning: true })
+    const toggle = screen.getByRole("switch", { name: "Show only the best" })
+    expect(toggle).not.toBeChecked()
+    expect(toggle).toBeEnabled()
+    await userEvent.click(toggle)
+    expect(props.onShowOnlyBestChange).toHaveBeenCalledWith(true)
+    expect(props.onChangeConfig).not.toHaveBeenCalled()
+    rerender(<TrainingSidebar {...props} showOnlyBest />)
+    expect(toggle).toBeChecked()
+    await userEvent.click(toggle)
+    expect(props.onShowOnlyBestChange).toHaveBeenLastCalledWith(false)
+  })
+
   it("renders diagnostics and starts an idle run", async () => {
     const user = userEvent.setup()
     const { props } = renderSidebar()
